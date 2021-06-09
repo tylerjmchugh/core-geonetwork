@@ -214,7 +214,7 @@
                   autoUpload: scope.autoUpload,
                   url:
                     "../api/records/" +
-                    scope.uuid +
+                    encodeURIComponent(scope.uuid) +
                     "/attachments?visibility=" +
                     defaultStatus,
                   singleUpload: false

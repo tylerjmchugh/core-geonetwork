@@ -748,6 +748,10 @@
               Object.keys(field).forEach(
                 function (th) {
                   this.translateMultilingualObjects.call(this, field[th].keywords);
+                  let multilingualTitle = field[th].multilingualTitle;
+                  if (multilingualTitle != null) {
+                    this.translateMultilingualObjects.call(this, multilingualTitle);
+                  }
                 }.bind(this)
               );
             } else if (

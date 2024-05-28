@@ -447,7 +447,16 @@
         <xsl:if test="info/@id != ''">
           "id": "<xsl:value-of select="util:escapeForJson(info/@id)"/>",
         </xsl:if>
-        "title": "<xsl:value-of select="util:escapeForJson(info/@title)"/>",
+        <xsl:choose>
+          <xsl:when test="exists(info/multilingualTitle)">
+            "multilingualTitle": {
+              <xsl:value-of select="string-join(info/multilingualTitle/value, ', ')"/>
+            },
+          </xsl:when>
+          <xsl:otherwise>
+            "title": "<xsl:value-of select="util:escapeForJson(info/@title)"/>",
+          </xsl:otherwise>
+        </xsl:choose>
         "theme": "<xsl:value-of select="util:escapeForJson(info/@type)"/>",
         <xsl:if test="info/@uri != ''">
           "link": "<xsl:value-of select="util:escapeForJson(info/@uri)"/>",
@@ -698,10 +707,10 @@
   <xsl:function name="gn-fn-index:json-escape" as="xs:string?">
     <!-- This function is deprecated. Please update your code to define the following namespace:
             xmlns:util="java:org.fao.geonet.util.XslUtil"
-            
-            and use util:escapeForJson function 
+
+            and use util:escapeForJson function
     -->
-    
+
       <xsl:param name="v" as="xs:string?" />
       <xsl:choose>
         <xsl:when test="normalize-space($v) = ''"></xsl:when>

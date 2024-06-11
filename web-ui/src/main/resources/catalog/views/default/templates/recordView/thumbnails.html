@@ -1,5 +1,5 @@
 <ul class="gn-thumbnails" data-ng-if="mdView.current.record.overview.length > 0">
-  <li data-ng-repeat="img in mdView.current.record.overview">
+  <li data-ng-repeat="img in mdView.current.record.overview" data-ng-if="!img.disabled">
     <img
       data-gn-img-modal="img"
       class="img-thumbnail"

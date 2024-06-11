@@ -750,6 +750,20 @@
                   this.translateMultilingualObjects.call(this, field[th].keywords);
                 }.bind(this)
               );
+            } else if (fieldName === "overview") {
+              // Translate the overview object's multilingual fields
+              this.translateMultingualFields(field);
+              // Collect the overview(s)
+              var overviews = angular.isArray(field) ? field : [field];
+              // Disable overviews that have a language set to a value other the current language
+              overviews.forEach((overview) => {
+                overview.currentLang = gnLangs.current;
+                if (!overview.lang || overview.lang.startsWith(gnLangs.current)) {
+                  overview.disabled = false;
+                } else {
+                  overview.disabled = true;
+                }
+              });
             } else if (
               fieldName.match(/th_.*$/) !== null &&
               fieldName.match(/.*(_tree|Number)$/) === null

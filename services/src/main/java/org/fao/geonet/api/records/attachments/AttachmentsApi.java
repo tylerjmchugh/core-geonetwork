@@ -41,10 +41,12 @@ import org.apache.commons.codec.digest.DigestUtils;
 import org.fao.geonet.ApplicationContextHolder;
 import org.fao.geonet.api.ApiParams;
 import org.fao.geonet.api.ApiUtils;
+import org.fao.geonet.api.exception.ResourceNotFoundException;
 import org.fao.geonet.domain.AbstractMetadata;
 import org.fao.geonet.domain.MetadataResource;
 import org.fao.geonet.domain.MetadataResourceVisibility;
 import org.fao.geonet.domain.MetadataResourceVisibilityConverter;
+import org.fao.geonet.domain.Profile;
 import org.fao.geonet.events.history.AttachmentAddedEvent;
 import org.fao.geonet.events.history.AttachmentDeletedEvent;
 import org.fao.geonet.kernel.datamanager.IMetadataIndexer;
@@ -83,6 +85,7 @@ import java.net.URL;
 import java.time.ZonedDateTime;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Metadata resource related operations.
@@ -105,6 +108,11 @@ public class AttachmentsApi {
     private SettingManager settingManager;
     private IMetadataManager metadataManager;
     private IMetadataIndexer metadataIndexer;
+
+    @Autowired(required = false)
+    private AsyncResourceUploadService asyncResourceUploadService;
+    @Autowired(required = false)
+    private ResourceUploadTaskRegistry resourceUploadTaskRegistry;
 
     public AttachmentsApi() {
     }
@@ -237,21 +245,43 @@ public class AttachmentsApi {
         return resource;
     }
 
-    @io.swagger.v3.oas.annotations.Operation(summary = "Create a new resource from a URL for a given metadata")
+    @io.swagger.v3.oas.annotations.Operation(summary = "Create a new resource from a URL for a given metadata",
+        description = "By default the request blocks until the file has been fully downloaded and stored. " +
+            "Set 'async=true' to instead get an immediate 202 response with a task that can be polled " +
+            "via GET .../attachments/uploads/{taskId} for progress and completion, useful for large files.")
     @PreAuthorize("hasAuthority('Editor')")
     @RequestMapping(method = RequestMethod.PUT,
         produces = MediaType.APPLICATION_JSON_VALUE)
-    @ResponseStatus(value = HttpStatus.CREATED)
     @ApiResponses(value = {@ApiResponse(responseCode = "201", description = "Attachment added."),
+        @ApiResponse(responseCode = "202", description = "Attachment upload accepted and running in the background (async=true).",
+            content = @Content(schema = @Schema(implementation = ResourceUploadTask.class))),
         @ApiResponse(responseCode = "403", description = ApiParams.API_RESPONSE_NOT_ALLOWED_CAN_EDIT)})
     @ResponseBody
-    public MetadataResource putResourceFromURL(
+    public ResponseEntity<?> putResourceFromURL(
         @Parameter(description = "The metadata UUID", required = true, example = "43d7c186-2187-4bcd-8843-41e575a5ef56") @PathVariable String metadataUuid,
         @Parameter(description = "The sharing policy", example = "public") @RequestParam(required = false, defaultValue = "public") MetadataResourceVisibility visibility,
         @Parameter(description = "The URL to load in the store") @RequestParam("url") URL url,
         @Parameter(description = "Use approved version or not", example = "true") @RequestParam(required = false, defaultValue = "false") Boolean approved,
+        @Parameter(description = "Run the upload in the background and return immediately with a pollable task instead of waiting for completion")
+        @RequestParam(required = false, defaultValue = "false") Boolean async,
         @Parameter(hidden = true) HttpServletRequest request) throws Exception {
         ServiceContext context = ApiUtils.createServiceContext(request);
+
+        // Fail fast (synchronously) if the user is not allowed to edit this record, whether
+        // the actual upload will happen now or in the background.
+        ApiUtils.canEditRecord(metadataUuid, approved, request);
+
+        if (Boolean.TRUE.equals(async)) {
+            if (asyncResourceUploadService == null) {
+                throw new IllegalStateException("Asynchronous resource upload is not available.");
+            }
+            ResourceUploadTask task = asyncResourceUploadService.submit(store, context, metadataUuid, url, visibility, approved);
+            String location = request.getRequestURL().append("/uploads/").append(task.getId()).toString();
+            return ResponseEntity.status(HttpStatus.ACCEPTED)
+                .header(HttpHeaders.LOCATION, location)
+                .body(task);
+        }
+
         MetadataResource resource = store.putResource(context, metadataUuid, url, visibility, approved);
 
         String metadataIdString = ApiUtils.getInternalId(metadataUuid, approved);
@@ -262,7 +292,64 @@ public class AttachmentsApi {
                 .publish(ApplicationContextHolder.get());
         }
 
-        return resource;
+        return ResponseEntity.status(HttpStatus.CREATED).body(resource);
+    }
+
+    @io.swagger.v3.oas.annotations.Operation(summary = "Get the status of an asynchronous resource upload",
+        description = "Poll this endpoint after starting an upload with PUT .../attachments?url=..&async=true.")
+    @PreAuthorize("hasAuthority('Editor')")
+    @RequestMapping(value = "/uploads/{taskId}", method = RequestMethod.GET, produces = MediaType.APPLICATION_JSON_VALUE)
+    @ApiResponses(value = {@ApiResponse(responseCode = "200", description = "Upload task status."),
+        @ApiResponse(responseCode = "403", description = ApiParams.API_RESPONSE_NOT_ALLOWED_CAN_EDIT),
+        @ApiResponse(responseCode = "404", description = "Unknown or expired upload task.")})
+    @ResponseBody
+    public ResourceUploadTask getUploadTask(
+        @Parameter(description = "The metadata UUID", required = true, example = "43d7c186-2187-4bcd-8843-41e575a5ef56") @PathVariable String metadataUuid,
+        @Parameter(description = "The upload task identifier", required = true) @PathVariable String taskId,
+        @Parameter(hidden = true) HttpServletRequest request) throws Exception {
+        return getOwnedTaskOrThrow(metadataUuid, taskId, request);
+    }
+
+    @io.swagger.v3.oas.annotations.Operation(summary = "List the asynchronous resource upload tasks for a record")
+    @PreAuthorize("hasAuthority('Editor')")
+    @RequestMapping(value = "/uploads", method = RequestMethod.GET, produces = MediaType.APPLICATION_JSON_VALUE)
+    @ApiResponses(value = {@ApiResponse(responseCode = "200", description = "Upload tasks for the record.")})
+    @ResponseBody
+    public List<ResourceUploadTask> getUploadTasks(
+        @Parameter(description = "The metadata UUID", required = true, example = "43d7c186-2187-4bcd-8843-41e575a5ef56") @PathVariable String metadataUuid,
+        @Parameter(hidden = true) HttpServletRequest request) throws Exception {
+        ApiUtils.canEditRecord(metadataUuid, request);
+        if (resourceUploadTaskRegistry == null) {
+            return Collections.emptyList();
+        }
+        UserSession userSession = ApiUtils.getUserSession(request.getSession());
+        return resourceUploadTaskRegistry.getByMetadataUuid(metadataUuid).stream()
+            .filter(t -> isTaskOwnerOrAdmin(t, userSession))
+            .collect(Collectors.toList());
+    }
+
+    private ResourceUploadTask getOwnedTaskOrThrow(String metadataUuid, String taskId, HttpServletRequest request) throws Exception {
+        ApiUtils.canEditRecord(metadataUuid, request);
+        ResourceUploadTask task = resourceUploadTaskRegistry == null ? null : resourceUploadTaskRegistry.get(taskId);
+        if (task == null || !task.getMetadataUuid().equals(metadataUuid)) {
+            throw new ResourceNotFoundException(String.format("Upload task '%s' not found for record '%s'.", taskId, metadataUuid));
+        }
+        UserSession userSession = ApiUtils.getUserSession(request.getSession());
+        if (!isTaskOwnerOrAdmin(task, userSession)) {
+            throw new SecurityException(String.format("User '%s' is not allowed to access upload task '%s'.",
+                userSession.getUsername(), taskId));
+        }
+        return task;
+    }
+
+    private boolean isTaskOwnerOrAdmin(ResourceUploadTask task, UserSession userSession) {
+        if (userSession == null) {
+            return false;
+        }
+        if (userSession.getProfile() != null && userSession.getProfile().equals(Profile.Administrator)) {
+            return true;
+        }
+        return task.getOwnerUserId() != null && task.getOwnerUserId().equals(userSession.getUserIdAsInt());
     }
 
     @io.swagger.v3.oas.annotations.Operation(summary = "Get a metadata resource")

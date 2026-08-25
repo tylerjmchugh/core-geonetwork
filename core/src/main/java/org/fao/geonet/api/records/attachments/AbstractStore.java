@@ -32,13 +32,16 @@ import org.fao.geonet.api.exception.NotAllowedException;
 import org.fao.geonet.api.exception.InputStreamLimitExceededException;
 import org.fao.geonet.api.exception.ResourceAlreadyExistException;
 import org.fao.geonet.api.exception.ResourceNotFoundException;
+import org.fao.geonet.constants.Geonet;
 import org.fao.geonet.domain.AbstractMetadata;
 import org.fao.geonet.domain.MetadataResource;
 import org.fao.geonet.domain.MetadataResourceVisibility;
 import org.fao.geonet.kernel.AccessManager;
 import org.fao.geonet.kernel.datamanager.IMetadataUtils;
 import org.fao.geonet.repository.MetadataRepository;
+import org.fao.geonet.util.KnownSizeInputStream;
 import org.fao.geonet.util.LimitedInputStream;
+import org.fao.geonet.utils.Log;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -242,6 +245,54 @@ public abstract class AbstractStore implements Store {
         return fileName;
     }
 
+    /**
+     * Resolves the total/expected size of {@code is}, if known, without relying on the unreliable
+     * {@link InputStream#available()} (which for network/streamed sources only reports how many
+     * bytes are currently buffered and ready to read WITHOUT blocking - often a small, arbitrary
+     * chunk - not the total remaining size of the stream; see issue #9433 / truncated uploads).
+     *
+     * <p>Checks the {@link KnownSizeInputStream} marker interface, which is implemented by
+     * {@link LimitedInputStream} (used for multipart/URL uploads) as well as decorators like
+     * {@link ProgressReportingInputStream} (which unwraps through to a wrapped
+     * {@code LimitedInputStream} itself), so the real size is found regardless of how many stream
+     * decorators it's wrapped in. All {@link Store} implementations should use this - shared here
+     * so every backend resolves/checks the expected upload size the same way - instead of each
+     * reimplementing (or inconsistently narrowing) the check.
+     *
+     * @param is the stream to inspect
+     * @return the resolved size, or {@code -1} if unknown
+     */
+    public static long resolveExpectedSize(InputStream is) {
+        if (is instanceof KnownSizeInputStream) {
+            return ((KnownSizeInputStream) is).getKnownSize();
+        }
+        return -1L;
+    }
+
+    /**
+     * Logs a warning if {@code actualSize} doesn't match the {@code expectedSize} that was
+     * resolved upfront (see {@link #resolveExpectedSize(InputStream)}) for an uploaded resource,
+     * which can indicate a truncated/corrupted upload. Does nothing if {@code expectedSize} is
+     * unknown ({@code < 0}).
+     *
+     * @param label        short label identifying what is being compared (eg. "Upload byte count",
+     *                     "Stored file size"), used to distinguish log messages from different
+     *                     stages/checks
+     * @param metadataUuid the uuid of the owner metadata record
+     * @param metadataId   the id of the owner metadata record
+     * @param filename     the name of the resource being uploaded
+     * @param expectedSize the previously resolved expected size, or {@code -1} if unknown
+     * @param actualSize   the actual size observed
+     */
+    protected static void logSizeMismatchIfAny(String label, String metadataUuid, int metadataId, String filename,
+                                                long expectedSize, long actualSize) {
+        if (expectedSize >= 0 && actualSize != expectedSize) {
+            Log.warning(Geonet.RESOURCES, String.format(
+                "%s mismatch for metadata '%s' (id=%d), file '%s'. expectedSize=%d bytes, actualSize=%d bytes",
+                label, metadataUuid, metadataId, filename, expectedSize, actualSize));
+        }
+    }
+
     @Override
     public final MetadataResource putResource(final ServiceContext context, final String metadataUuid, final MultipartFile file,
             final MetadataResourceVisibility visibility) throws Exception {
@@ -287,6 +338,13 @@ public abstract class AbstractStore implements Store {
     @Override
     public final MetadataResource putResource(ServiceContext context, String metadataUuid, URL fileUrl,
             MetadataResourceVisibility visibility, Boolean approved) throws Exception {
+        return putResource(context, metadataUuid, fileUrl, visibility, approved, ResourceUploadProgressListener.NO_OP);
+    }
+
+    @Override
+    public final MetadataResource putResource(ServiceContext context, String metadataUuid, URL fileUrl,
+            MetadataResourceVisibility visibility, Boolean approved, ResourceUploadProgressListener progressListener)
+            throws Exception {
 
         // Open a connection to the URL
         HttpURLConnection connection = (HttpURLConnection) fileUrl.openConnection();
@@ -318,13 +376,25 @@ public abstract class AbstractStore implements Store {
 
         // Check if the content length is within the allowed limit
         long contentLength = connection.getContentLengthLong();
+        if (log.isDebugEnabled()) {
+            log.debug("Uploading URL resource '{}' for metadata '{}'. advertisedContentLength={} bytes", fileUrl, metadataUuid, contentLength);
+        }
         if (contentLength > maxUploadSize) {
             throw new InputStreamLimitExceededException(maxUploadSize, contentLength);
         }
 
+        ResourceUploadProgressListener listener = progressListener != null ? progressListener : ResourceUploadProgressListener.NO_OP;
+        listener.onProgress(0, contentLength);
+
         // Upload the resource while ensuring the input stream does not exceed the maximum allowed size.
-        try (LimitedInputStream is = new LimitedInputStream(connection.getInputStream(), maxUploadSize, contentLength)) {
-            return putResource(context, metadataUuid, filename, is, null, visibility, approved);
+        try (LimitedInputStream is = new LimitedInputStream(connection.getInputStream(), maxUploadSize, contentLength);
+             ProgressReportingInputStream progressIs = new ProgressReportingInputStream(is, contentLength, listener)) {
+            MetadataResource uploadedResource = putResource(context, metadataUuid, filename, progressIs, null, visibility, approved);
+            if (log.isDebugEnabled()) {
+                log.debug("Completed URL resource upload '{}' for metadata '{}'. transferredBytes={} bytes, advertisedContentLength={} bytes",
+                    filename, metadataUuid, progressIs.getBytesTransferred(), contentLength);
+            }
+            return uploadedResource;
         }
     }
 

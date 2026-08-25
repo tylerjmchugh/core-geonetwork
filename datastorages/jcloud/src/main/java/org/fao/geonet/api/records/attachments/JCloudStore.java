@@ -39,6 +39,7 @@ import org.fao.geonet.kernel.setting.SettingManager;
 import org.fao.geonet.languages.IsoLanguagesMapper;
 import org.fao.geonet.lib.Lib;
 import org.fao.geonet.resources.JCloudConfiguration;
+import org.fao.geonet.util.KnownSizeInputStream;
 import org.fao.geonet.util.LimitedInputStream;
 import org.fao.geonet.utils.Log;
 import org.jclouds.blobstore.ContainerNotFoundException;
@@ -367,11 +368,23 @@ public class JCloudStore extends AbstractStore {
                 // Update/set version
                 setPropertiesVersion(context, properties, isNewResource, metadataUuid, metadataId, visibility, approved, filename);
 
-                long contentLength;
-                // If the input stream is a LimitedInputStream and the file size is known then use that value otherwise use the available value.
-                if (is instanceof LimitedInputStream && ((LimitedInputStream) is).getFileSize() > 0) {
-                    contentLength = ((LimitedInputStream) is).getFileSize();
-                } else {
+                // Resolve the declared content length to use for the upload. We can NOT rely on
+                // InputStream#available(): for network/streamed sources it only reports how many
+                // bytes are currently buffered and ready to read WITHOUT blocking (often a small,
+                // arbitrary chunk, eg. a few KB), not the total remaining size of the stream.
+                // Declaring that as the blob's contentLength causes the blob store to stop reading
+                // (and consider the upload complete) after only that many bytes, silently
+                // truncating the stored resource.
+                //
+                // The real size IS usually known upfront (eg. the Content-Length header of a
+                // URL-based upload, or the declared size of a multipart file), but it may be
+                // carried by a KnownSizeInputStream (eg. LimitedInputStream) that is itself wrapped
+                // by other stream decorators (eg. ProgressReportingInputStream) rather than being
+                // the outermost stream instance; resolveExpectedSize() (inherited from
+                // AbstractStore) unwraps those to find it, only falling back to available() as an
+                // absolute last resort when no known size could be determined at all.
+                long contentLength = resolveExpectedSize(is);
+                if (contentLength < 0) {
                     contentLength = is.available();
                 }
 
@@ -403,6 +416,9 @@ public class JCloudStore extends AbstractStore {
             }
         }
     }
+
+
+
 
     protected void setProperties(Map<String, String> properties, String metadataUuid, Date changeDate, Map<String, String> additionalProperties) {
 

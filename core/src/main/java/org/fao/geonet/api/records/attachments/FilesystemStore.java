@@ -250,12 +250,27 @@ public class FilesystemStore extends AbstractStore {
         int metadataId = canEdit(context, metadataUuid, approved);
         checkResourceId(filename);
         Path filePath = getPath(context, metadataId, visibility, filename, approved);
+        long expectedSize = resolveExpectedSize(is);
+        if (Log.isDebugEnabled(Geonet.RESOURCES)) {
+            Log.debug(Geonet.RESOURCES,
+                String.format("Starting resource write for metadata '%s' (id=%d), file '%s'. expectedSize=%d bytes, visibility=%s, target='%s'",
+                    metadataUuid, metadataId, filename, expectedSize, visibility, filePath));
+        }
+        long copiedSize;
         try {
-            Files.copy(is, filePath, StandardCopyOption.REPLACE_EXISTING);
+            copiedSize = Files.copy(is, filePath, StandardCopyOption.REPLACE_EXISTING);
         } catch (InputStreamLimitExceededException e) {
             Files.deleteIfExists(filePath);
             throw e;
         }
+        long storedSize = Files.size(filePath);
+        if (Log.isDebugEnabled(Geonet.RESOURCES)) {
+            Log.debug(Geonet.RESOURCES,
+                String.format("Completed resource write for metadata '%s' (id=%d), file '%s'. copiedSize=%d bytes, storedSize=%d bytes",
+                    metadataUuid, metadataId, filename, copiedSize, storedSize));
+        }
+        logSizeMismatchIfAny("Upload byte count", metadataUuid, metadataId, filename, expectedSize, copiedSize);
+        logSizeMismatchIfAny("Stored file size", metadataUuid, metadataId, filename, copiedSize, storedSize);
         if (changeDate != null) {
             IO.touch(filePath, FileTime.from(changeDate.getTime(), TimeUnit.MILLISECONDS));
         }

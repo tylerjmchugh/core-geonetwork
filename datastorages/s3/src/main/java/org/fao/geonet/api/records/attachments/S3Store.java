@@ -176,6 +176,16 @@ public class S3Store extends AbstractStore {
         if (changeDate != null) {
             metadata.setLastModified(changeDate);
         }
+        // Declare the content length upfront when known (eg. the Content-Length header of a
+        // URL-based upload, possibly carried by a KnownSizeInputStream wrapped by other stream
+        // decorators, resolved via resolveExpectedSize() inherited from AbstractStore). Without
+        // it, the AWS SDK has to buffer the entire stream in memory first to determine its size
+        // before it can upload it, which is both inefficient and risky (out of memory) for large
+        // files.
+        long knownSize = resolveExpectedSize(is);
+        if (knownSize >= 0) {
+            metadata.setContentLength(knownSize);
+        }
         final PutObjectResult putAnswer = s3.getClient().putObject(s3.getBucket(), key, is, metadata);
         return createResourceDescription(metadataUuid, visibility, filename, putAnswer.getMetadata().getContentLength(),
                                          putAnswer.getMetadata().getLastModified(), metadataId, approved);

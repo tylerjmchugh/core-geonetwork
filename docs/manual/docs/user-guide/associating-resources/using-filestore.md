@@ -36,3 +36,38 @@ During startup of the application, this limit can be adjusted by adding the foll
 Types of attachments allowed to be uploaded can be configured in the system settings.  
 See [Metadata configuration](../../administrator-guide/configuring-the-catalog/system-configuration.md#metadata_configuration) for more details.
 
+## Uploading a resource from a URL asynchronously
+
+!!! info "Version Added"
+
+    4.4.13
+
+`PUT .../api/records/{metadataUuid}/attachments?url=...` normally blocks the HTTP request until the
+remote file has been fully downloaded and stored, which can time out for large files. Adding
+`&async=true` to the request instead returns immediately with `202 Accepted` and a task
+description:
+
+```json
+{
+  "id": "5f2c5b6e-...",
+  "metadataUuid": "43d7c186-2187-4bcd-8843-41e575a5ef56",
+  "url": "https://example.org/big-file.zip",
+  "status": "RUNNING",
+  "bytesTransferred": 10485760,
+  "totalBytes": 104857600,
+  "percentComplete": 10,
+  "filename": "big-file.zip",
+  "resource": null,
+  "error": null
+}
+```
+
+The response also includes a `Location` header pointing at the task status URL. Poll
+`GET .../api/records/{metadataUuid}/attachments/uploads/{taskId}` until `status` is `COMPLETED`
+(the created attachment is available in the `resource` field) or `FAILED` (see `error`).
+`GET .../api/records/{metadataUuid}/attachments/uploads` lists the upload tasks for a record.
+
+Only the user who started the upload, or an Administrator, can view its task. Task state is kept
+in memory on the node that accepted the request: it does not survive a restart and, in a
+clustered deployment, must be polled on the same node.
+

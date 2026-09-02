@@ -328,6 +328,37 @@ public class AttachmentsApi {
             .collect(Collectors.toList());
     }
 
+    @io.swagger.v3.oas.annotations.Operation(
+        summary = "Cancel an asynchronous resource upload"
+    )
+    @PreAuthorize("hasAuthority('Editor')")
+    @RequestMapping(
+        value = "/uploads/{taskId}",
+        method = RequestMethod.DELETE,
+        produces = MediaType.APPLICATION_JSON_VALUE
+    )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Upload cancelled."),
+        @ApiResponse(responseCode = "403", description = ApiParams.API_RESPONSE_NOT_ALLOWED_CAN_EDIT),
+        @ApiResponse(responseCode = "404", description = "Unknown or expired upload task."),
+        @ApiResponse(responseCode = "409", description = "Upload has already finished.")
+    })
+    @ResponseBody
+    public ResponseEntity<ResourceUploadTask> cancelUploadTask(
+        @PathVariable String metadataUuid,
+        @PathVariable String taskId,
+        HttpServletRequest request
+    ) throws Exception {
+        ResourceUploadTask task =
+            getOwnedTaskOrThrow(metadataUuid, taskId, request);
+
+        if (!asyncResourceUploadService.cancel(task)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(task);
+        }
+
+        return ResponseEntity.ok(task);
+    }
+
     private ResourceUploadTask getOwnedTaskOrThrow(String metadataUuid, String taskId, HttpServletRequest request) throws Exception {
         ApiUtils.canEditRecord(metadataUuid, request);
         ResourceUploadTask task = resourceUploadTaskRegistry == null ? null : resourceUploadTaskRegistry.get(taskId);

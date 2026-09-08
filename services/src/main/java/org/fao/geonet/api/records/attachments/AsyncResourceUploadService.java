@@ -37,10 +37,13 @@ import org.fao.geonet.utils.Log;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.http.HttpHeaders;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.http.ContentDisposition;
 
+import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -95,6 +98,11 @@ public class AsyncResourceUploadService implements DisposableBean {
         SecurityContext securityContext = SecurityContextHolder.getContext();
 
         ResourceUploadTask task = new ResourceUploadTask(metadataUuid, url.toString(), visibility, approved, ownerUserId);
+        // Get the real filename from remote server's HTTP headers before registering
+        String filename = getFilenameFromUrlHeaders(url);
+        if (filename != null) {
+            task.setFilename(filename);
+        }
         registry.register(task);
         if (Log.isDebugEnabled(org.fao.geonet.constants.Geonet.RESOURCES)) {
             Log.debug(org.fao.geonet.constants.Geonet.RESOURCES,
@@ -152,6 +160,8 @@ public class AsyncResourceUploadService implements DisposableBean {
                     }
                     return uploaded;
                 });
+            // Update task with actual stored filename (in case server-stored name differs from Content-Disposition)
+            task.setFilename(resource.getFilename());
             task.complete(resource);
             if (Log.isDebugEnabled(org.fao.geonet.constants.Geonet.RESOURCES)) {
                 Log.debug(org.fao.geonet.constants.Geonet.RESOURCES,
@@ -185,6 +195,55 @@ public class AsyncResourceUploadService implements DisposableBean {
         }
 
         return true;
+    }
+
+    /**
+     * Get the filename from the remote URL's Content-Disposition header via HEAD request.
+     * Falls back to extracting from URL path if the header is not available or HEAD fails.
+     *
+     * @return the filename, or null if it cannot be determined
+     */
+    private String getFilenameFromUrlHeaders(URL url) {
+        try {
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("HEAD");
+            connection.setInstanceFollowRedirects(true);
+
+            if (connection.getResponseCode() == HttpURLConnection.HTTP_OK) {
+                String contentDisposition = connection.getHeaderField(HttpHeaders.CONTENT_DISPOSITION);
+                if (contentDisposition != null && !contentDisposition.isEmpty()) {
+                    String filename = ContentDisposition.parse(contentDisposition).getFilename();
+                    if (filename != null && !filename.isEmpty()) {
+                        return filename;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // HEAD request failed, will fall back to URL path
+        }
+
+        // Fall back to extracting filename from URL path
+        return extractFilenameFromUrl(url);
+    }
+
+    /**
+     * Extract a filename from a URL path. Returns the last path segment, or null if empty.
+     */
+    private String extractFilenameFromUrl(URL url) {
+        String path = url.getPath();
+        if (path == null || path.isEmpty()) {
+            return null;
+        }
+
+        String filename = path.substring(path.lastIndexOf('/') + 1);
+
+        // Remove query string
+        int queryIndex = filename.indexOf('?');
+        if (queryIndex > 0) {
+            filename = filename.substring(0, queryIndex);
+        }
+
+        return filename.isEmpty() ? null : filename;
     }
 
     @Override

@@ -30,7 +30,12 @@
   var humanizeDataSize = function (bytes) {
     var numericBytes = Number(bytes);
 
-    if (bytes === null || angular.isUndefined(bytes) || !isFinite(numericBytes) || numericBytes < 0) {
+    if (
+      bytes === null ||
+      angular.isUndefined(bytes) ||
+      !isFinite(numericBytes) ||
+      numericBytes < 0
+    ) {
       return null;
     }
 

@@ -42,12 +42,10 @@ import org.fao.geonet.ApplicationContextHolder;
 import org.fao.geonet.api.ApiParams;
 import org.fao.geonet.api.ApiUtils;
 import org.fao.geonet.api.exception.ResourceAlreadyExistException;
-import org.fao.geonet.api.exception.ResourceNotFoundException;
 import org.fao.geonet.domain.AbstractMetadata;
 import org.fao.geonet.domain.MetadataResource;
 import org.fao.geonet.domain.MetadataResourceVisibility;
 import org.fao.geonet.domain.MetadataResourceVisibilityConverter;
-import org.fao.geonet.domain.Profile;
 import org.fao.geonet.events.history.AttachmentAddedEvent;
 import org.fao.geonet.events.history.AttachmentDeletedEvent;
 import org.fao.geonet.kernel.datamanager.IMetadataIndexer;
@@ -86,7 +84,6 @@ import java.net.URL;
 import java.time.ZonedDateTime;
 import java.util.Collections;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * Metadata resource related operations.
@@ -266,12 +263,9 @@ public class AttachmentsApi {
         @RequestParam(required = false, defaultValue = "false") Boolean async,
         @Parameter(hidden = true) HttpServletRequest request) throws Exception {
         ServiceContext context = ApiUtils.createServiceContext(request);
-
-        // Fail fast (synchronously) if the user is not allowed to edit this record, whether
-        // the actual upload will happen now or in the background.
         ApiUtils.canEditRecord(metadataUuid, approved, request);
 
-        if (asyncResourceUploadService != null && asyncResourceUploadService.hasInProgressUpload(metadataUuid, url)) {
+        if (asyncResourceUploadService.hasInProgressUpload(metadataUuid, url)) {
             throw new ResourceAlreadyExistException(String.format(
                 "An upload for url '%s' is already in progress for record '%s'. Wait for completion before retrying.",
                 url, metadataUuid
@@ -279,9 +273,6 @@ public class AttachmentsApi {
         }
 
         if (Boolean.TRUE.equals(async)) {
-            if (asyncResourceUploadService == null) {
-                throw new IllegalStateException("Asynchronous resource upload is not available.");
-            }
             ResourceUploadTask task = asyncResourceUploadService.submit(store, context, metadataUuid, url, visibility, approved);
             String location = request.getRequestURL().append("/uploads/").append(task.getId()).toString();
             return ResponseEntity.status(HttpStatus.ACCEPTED)

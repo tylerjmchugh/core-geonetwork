@@ -269,30 +269,6 @@ public abstract class AbstractStore implements Store {
         return -1L;
     }
 
-    /**
-     * Logs a warning if {@code actualSize} doesn't match the {@code expectedSize} that was
-     * resolved upfront (see {@link #resolveExpectedSize(InputStream)}) for an uploaded resource,
-     * which can indicate a truncated/corrupted upload. Does nothing if {@code expectedSize} is
-     * unknown ({@code < 0}).
-     *
-     * @param label        short label identifying what is being compared (eg. "Upload byte count",
-     *                     "Stored file size"), used to distinguish log messages from different
-     *                     stages/checks
-     * @param metadataUuid the uuid of the owner metadata record
-     * @param metadataId   the id of the owner metadata record
-     * @param filename     the name of the resource being uploaded
-     * @param expectedSize the previously resolved expected size, or {@code -1} if unknown
-     * @param actualSize   the actual size observed
-     */
-    protected static void logSizeMismatchIfAny(String label, String metadataUuid, int metadataId, String filename,
-                                                long expectedSize, long actualSize) {
-        if (expectedSize >= 0 && actualSize != expectedSize) {
-            Log.warning(Geonet.RESOURCES, String.format(
-                "%s mismatch for metadata '%s' (id=%d), file '%s'. expectedSize=%d bytes, actualSize=%d bytes",
-                label, metadataUuid, metadataId, filename, expectedSize, actualSize));
-        }
-    }
-
     @Override
     public final MetadataResource putResource(final ServiceContext context, final String metadataUuid, final MultipartFile file,
             final MetadataResourceVisibility visibility) throws Exception {

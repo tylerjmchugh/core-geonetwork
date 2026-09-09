@@ -41,6 +41,7 @@ import org.apache.commons.codec.digest.DigestUtils;
 import org.fao.geonet.ApplicationContextHolder;
 import org.fao.geonet.api.ApiParams;
 import org.fao.geonet.api.ApiUtils;
+import org.fao.geonet.api.exception.ResourceAlreadyExistException;
 import org.fao.geonet.api.exception.ResourceNotFoundException;
 import org.fao.geonet.domain.AbstractMetadata;
 import org.fao.geonet.domain.MetadataResource;
@@ -108,11 +109,7 @@ public class AttachmentsApi {
     private SettingManager settingManager;
     private IMetadataManager metadataManager;
     private IMetadataIndexer metadataIndexer;
-
-    @Autowired(required = false)
     private AsyncResourceUploadService asyncResourceUploadService;
-    @Autowired(required = false)
-    private ResourceUploadTaskRegistry resourceUploadTaskRegistry;
 
     public AttachmentsApi() {
     }
@@ -132,11 +129,13 @@ public class AttachmentsApi {
         FileMimetypeChecker fileMimetypeChecker,
         SettingManager settingManager,
         IMetadataManager metadataManager,
-        IMetadataIndexer metadataIndexer) {
+        IMetadataIndexer metadataIndexer,
+        AsyncResourceUploadService asyncResourceUploadService) {
         this.fileMimetypeChecker = fileMimetypeChecker;
         this.settingManager = settingManager;
         this.metadataManager = metadataManager;
         this.metadataIndexer = metadataIndexer;
+        this.asyncResourceUploadService = asyncResourceUploadService;
     }
 
     /**
@@ -255,6 +254,7 @@ public class AttachmentsApi {
     @ApiResponses(value = {@ApiResponse(responseCode = "201", description = "Attachment added."),
         @ApiResponse(responseCode = "202", description = "Attachment upload accepted and running in the background (async=true).",
             content = @Content(schema = @Schema(implementation = ResourceUploadTask.class))),
+        @ApiResponse(responseCode = "409", description = "An upload for the same record/file is already running. Wait for completion before retrying."),
         @ApiResponse(responseCode = "403", description = ApiParams.API_RESPONSE_NOT_ALLOWED_CAN_EDIT)})
     @ResponseBody
     public ResponseEntity<?> putResourceFromURL(
@@ -270,6 +270,13 @@ public class AttachmentsApi {
         // Fail fast (synchronously) if the user is not allowed to edit this record, whether
         // the actual upload will happen now or in the background.
         ApiUtils.canEditRecord(metadataUuid, approved, request);
+
+        if (asyncResourceUploadService != null && asyncResourceUploadService.hasInProgressUpload(metadataUuid, url)) {
+            throw new ResourceAlreadyExistException(String.format(
+                "An upload for url '%s' is already in progress for record '%s'. Wait for completion before retrying.",
+                url, metadataUuid
+            ));
+        }
 
         if (Boolean.TRUE.equals(async)) {
             if (asyncResourceUploadService == null) {
@@ -307,7 +314,8 @@ public class AttachmentsApi {
         @Parameter(description = "The metadata UUID", required = true, example = "43d7c186-2187-4bcd-8843-41e575a5ef56") @PathVariable String metadataUuid,
         @Parameter(description = "The upload task identifier", required = true) @PathVariable String taskId,
         @Parameter(hidden = true) HttpServletRequest request) throws Exception {
-        return getOwnedTaskOrThrow(metadataUuid, taskId, request);
+        ApiUtils.canEditRecord(metadataUuid, request);
+        return asyncResourceUploadService.getOwnedTaskOrThrow(metadataUuid, taskId, request);
     }
 
     @io.swagger.v3.oas.annotations.Operation(summary = "List the asynchronous resource upload tasks for a record")
@@ -319,13 +327,8 @@ public class AttachmentsApi {
         @Parameter(description = "The metadata UUID", required = true, example = "43d7c186-2187-4bcd-8843-41e575a5ef56") @PathVariable String metadataUuid,
         @Parameter(hidden = true) HttpServletRequest request) throws Exception {
         ApiUtils.canEditRecord(metadataUuid, request);
-        if (resourceUploadTaskRegistry == null) {
-            return Collections.emptyList();
-        }
         UserSession userSession = ApiUtils.getUserSession(request.getSession());
-        return resourceUploadTaskRegistry.getByMetadataUuid(metadataUuid).stream()
-            .filter(t -> isTaskOwnerOrAdmin(t, userSession))
-            .collect(Collectors.toList());
+        return asyncResourceUploadService.listUploadsForUser(metadataUuid, userSession);
     }
 
     @io.swagger.v3.oas.annotations.Operation(
@@ -349,38 +352,14 @@ public class AttachmentsApi {
         @PathVariable String taskId,
         HttpServletRequest request
     ) throws Exception {
-        ResourceUploadTask task =
-            getOwnedTaskOrThrow(metadataUuid, taskId, request);
+        ApiUtils.canEditRecord(metadataUuid, request);
+        ResourceUploadTask task = asyncResourceUploadService.getOwnedTaskOrThrow(metadataUuid, taskId, request);
 
         if (!asyncResourceUploadService.cancel(task)) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(task);
         }
 
         return ResponseEntity.ok(task);
-    }
-
-    private ResourceUploadTask getOwnedTaskOrThrow(String metadataUuid, String taskId, HttpServletRequest request) throws Exception {
-        ApiUtils.canEditRecord(metadataUuid, request);
-        ResourceUploadTask task = resourceUploadTaskRegistry == null ? null : resourceUploadTaskRegistry.get(taskId);
-        if (task == null || !task.getMetadataUuid().equals(metadataUuid)) {
-            throw new ResourceNotFoundException(String.format("Upload task '%s' not found for record '%s'.", taskId, metadataUuid));
-        }
-        UserSession userSession = ApiUtils.getUserSession(request.getSession());
-        if (!isTaskOwnerOrAdmin(task, userSession)) {
-            throw new SecurityException(String.format("User '%s' is not allowed to access upload task '%s'.",
-                userSession.getUsername(), taskId));
-        }
-        return task;
-    }
-
-    private boolean isTaskOwnerOrAdmin(ResourceUploadTask task, UserSession userSession) {
-        if (userSession == null) {
-            return false;
-        }
-        if (userSession.getProfile() != null && userSession.getProfile().equals(Profile.Administrator)) {
-            return true;
-        }
-        return task.getOwnerUserId() != null && task.getOwnerUserId().equals(userSession.getUserIdAsInt());
     }
 
     @io.swagger.v3.oas.annotations.Operation(summary = "Get a metadata resource")

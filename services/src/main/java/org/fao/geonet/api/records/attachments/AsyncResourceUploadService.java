@@ -30,8 +30,10 @@ import jeeves.server.dispatchers.ServiceManager;
 import jeeves.transaction.TransactionManager;
 import org.fao.geonet.ApplicationContextHolder;
 import org.fao.geonet.api.ApiUtils;
+import org.fao.geonet.api.exception.ResourceNotFoundException;
 import org.fao.geonet.domain.MetadataResource;
 import org.fao.geonet.domain.MetadataResourceVisibility;
+import org.fao.geonet.domain.Profile;
 import org.fao.geonet.events.history.AttachmentAddedEvent;
 import org.fao.geonet.utils.Log;
 import org.springframework.beans.factory.DisposableBean;
@@ -43,10 +45,13 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.http.ContentDisposition;
 
+import javax.servlet.http.HttpServletRequest;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 /**
  * Runs "upload a resource from a URL" requests
@@ -195,6 +200,48 @@ public class AsyncResourceUploadService implements DisposableBean {
         }
 
         return true;
+    }
+
+    public List<ResourceUploadTask> listUploadsForUser(String metadataUuid, UserSession userSession) {
+        return registry.getByMetadataUuid(metadataUuid).stream()
+            .filter(t -> isTaskOwnerOrAdmin(t, userSession))
+            .collect(Collectors.toList());
+    }
+
+    public boolean hasInProgressUpload(String metadataUuid, URL url) {
+        String filename = getFilenameFromUrlHeaders(url);
+        return registry.getByMetadataUuid(metadataUuid).stream()
+            .filter(task -> !task.isTerminal())
+            .anyMatch(task -> {
+                String taskFilename = task.getFilename();
+                if (filename != null && taskFilename != null) {
+                    return filename.equals(taskFilename);
+                }
+                return false;
+            });
+    }
+
+    public ResourceUploadTask getOwnedTaskOrThrow(String metadataUuid, String taskId, HttpServletRequest request) throws Exception {
+        ResourceUploadTask task = registry == null ? null : registry.get(taskId);
+        if (task == null || !task.getMetadataUuid().equals(metadataUuid)) {
+            throw new ResourceNotFoundException(String.format("Upload task '%s' not found for record '%s'.", taskId, metadataUuid));
+        }
+        UserSession userSession = ApiUtils.getUserSession(request.getSession());
+        if (!isTaskOwnerOrAdmin(task, userSession)) {
+            throw new SecurityException(String.format("User '%s' is not allowed to access upload task '%s'.",
+                userSession.getUsername(), taskId));
+        }
+        return task;
+    }
+
+    private boolean isTaskOwnerOrAdmin(ResourceUploadTask task, UserSession userSession) {
+        if (userSession == null) {
+            return false;
+        }
+        if (userSession.getProfile() != null && userSession.getProfile().equals(Profile.Administrator)) {
+            return true;
+        }
+        return task.getOwnerUserId() != null && task.getOwnerUserId().equals(userSession.getUserIdAsInt());
     }
 
     /**

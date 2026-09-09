@@ -30,6 +30,7 @@ import org.junit.Test;
 import org.mockito.Mockito;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -50,7 +51,7 @@ public class ResourceUploadTaskTest {
             MetadataResourceVisibility.PUBLIC, false, 42);
         task.start();
         task.onProgress(25, 100);
-        assertEquals(ResourceUploadTask.Status.RUNNING, task.getStatus());
+        assertEquals(ResourceUploadTask.Status.UPLOADING, task.getStatus());
         assertEquals(Integer.valueOf(25), task.getPercentComplete());
 
         task.onProgress(100, 100);
@@ -72,6 +73,7 @@ public class ResourceUploadTaskTest {
         MetadataResource resource = Mockito.mock(MetadataResource.class);
 
         task.start();
+        task.startFinalizing();
         task.complete(resource);
 
         assertEquals(ResourceUploadTask.Status.COMPLETED, task.getStatus());
@@ -92,5 +94,41 @@ public class ResourceUploadTaskTest {
         assertTrue(task.isTerminal());
         assertNull(task.getResource());
         assertEquals("boom", task.getError());
+    }
+
+    @Test
+    public void cancelPendingTaskMovesDirectlyToCancelled() {
+        ResourceUploadTask task = new ResourceUploadTask("uuid-1", "https://example.org/file.zip",
+            MetadataResourceVisibility.PUBLIC, false, 42);
+
+        assertTrue(task.cancel());
+        assertEquals(ResourceUploadTask.Status.CANCELLED, task.getStatus());
+        assertTrue(task.isTerminal());
+        assertFalse(task.start());
+    }
+
+    @Test
+    public void cancelUploadingTaskUsesCancellingThenCancelledAfterCleanup() {
+        ResourceUploadTask task = new ResourceUploadTask("uuid-1", "https://example.org/file.zip",
+            MetadataResourceVisibility.PUBLIC, false, 42);
+
+        task.start();
+        assertTrue(task.cancel());
+        assertEquals(ResourceUploadTask.Status.CANCELLING, task.getStatus());
+        assertTrue(task.isCancelled());
+
+        task.markCancelledAfterCleanup();
+        assertEquals(ResourceUploadTask.Status.CANCELLED, task.getStatus());
+    }
+
+    @Test
+    public void cancelIsRejectedAfterFinalizingStarts() {
+        ResourceUploadTask task = new ResourceUploadTask("uuid-1", "https://example.org/file.zip",
+            MetadataResourceVisibility.PUBLIC, false, 42);
+
+        task.start();
+        assertTrue(task.startFinalizing());
+        assertFalse(task.cancel());
+        assertEquals(ResourceUploadTask.Status.FINALIZING, task.getStatus());
     }
 }

@@ -72,6 +72,8 @@ public class AsyncResourceUploadServiceTest {
         ResourceUploadTask completed = new ResourceUploadTask(
             "uuid-1", "http://example.test/path/report.csv", MetadataResourceVisibility.PUBLIC, false, 101);
         completed.setFilename("report.csv");
+        completed.start();
+        completed.startFinalizing();
         completed.complete(null);
         registry.register(completed);
 
@@ -82,6 +84,3 @@ public class AsyncResourceUploadServiceTest {
         assertFalse(blocked);
     }
 }
-
-
-

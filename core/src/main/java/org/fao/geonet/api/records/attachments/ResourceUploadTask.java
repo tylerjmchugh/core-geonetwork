@@ -32,6 +32,10 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.util.Date;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Tracks the state of an asynchronous "upload a resource from a URL" request
@@ -47,8 +51,17 @@ import java.util.UUID;
 public class ResourceUploadTask implements ResourceUploadProgressListener {
 
     public enum Status {
-        PENDING, RUNNING, COMPLETED, FAILED, CANCELLED
+        PENDING,
+        UPLOADING,
+        FINALIZING,
+        CANCELLING,
+        COMPLETED,
+        FAILED,
+        CANCELLED
     }
+
+    private static final ExecutorService STREAM_CLOSE_EXECUTOR = Executors.newCachedThreadPool(
+        new CancellationThreadFactory());
 
     private final String id = UUID.randomUUID().toString();
     private final String metadataUuid;
@@ -157,6 +170,14 @@ public class ResourceUploadTask implements ResourceUploadProgressListener {
         return status == Status.COMPLETED || status == Status.FAILED || status == Status.CANCELLED;
     }
 
+    public boolean isFinalizing() {
+        return status == Status.FINALIZING;
+    }
+
+    public boolean isCancelling() {
+        return status == Status.CANCELLING;
+    }
+
     @Override
     public void onProgress(long bytesTransferred, long totalBytes) {
         if (!isCancelled()) {
@@ -170,13 +191,22 @@ public class ResourceUploadTask implements ResourceUploadProgressListener {
             return false;
         }
 
-        status = Status.RUNNING;
+        status = Status.UPLOADING;
         startedDateTime = new Date();
         return true;
     }
 
+    public synchronized boolean startFinalizing() {
+        if (status != Status.UPLOADING) {
+            return false;
+        }
+
+        status = Status.FINALIZING;
+        return true;
+    }
+
     public synchronized void complete(MetadataResource resource) {
-        if (isTerminal()) {
+        if (status != Status.FINALIZING) {
             return;
         }
 
@@ -199,29 +229,41 @@ public class ResourceUploadTask implements ResourceUploadProgressListener {
         Closeable stream;
 
         synchronized (this) {
-            if (isTerminal()) {
+            if (isTerminal() || status == Status.FINALIZING) {
                 return false;
             }
 
-            status = Status.CANCELLED;
-            endedDateTime = new Date();
+            if (status == Status.CANCELLING) {
+                return true;
+            }
+
+            if (status == Status.PENDING) {
+                status = Status.CANCELLED;
+                endedDateTime = new Date();
+                return true;
+            }
+
+            status = Status.CANCELLING;
             stream = activeStream;
         }
 
         if (stream != null) {
-            try {
-                stream.close();
-            } catch (IOException ignored) {
-                // The task is already cancelled.
-            }
+            closeStreamAsync(stream);
         }
 
         return true;
     }
 
+    public synchronized void markCancelledAfterCleanup() {
+        if (status == Status.CANCELLING) {
+            status = Status.CANCELLED;
+            endedDateTime = new Date();
+        }
+    }
+
     @Override
     public boolean isCancelled() {
-        return status == Status.CANCELLED;
+        return status == Status.CANCELLING || status == Status.CANCELLED;
     }
 
     @Override
@@ -229,10 +271,7 @@ public class ResourceUploadTask implements ResourceUploadProgressListener {
         activeStream = stream;
 
         if (isCancelled()) {
-            try {
-                stream.close();
-            } catch (IOException ignored) {
-            }
+            closeStreamAsync(stream);
         }
     }
 
@@ -240,6 +279,27 @@ public class ResourceUploadTask implements ResourceUploadProgressListener {
     public void onStreamClosed(Closeable stream) {
         if (activeStream == stream) {
             activeStream = null;
+        }
+    }
+
+    private void closeStreamAsync(Closeable stream) {
+        STREAM_CLOSE_EXECUTOR.execute(() -> {
+            try {
+                stream.close();
+            } catch (IOException ignored) {
+                // Task cancellation already requested.
+            }
+        });
+    }
+
+    private static class CancellationThreadFactory implements ThreadFactory {
+        private final AtomicInteger counter = new AtomicInteger(1);
+
+        @Override
+        public Thread newThread(Runnable r) {
+            Thread t = new Thread(r, "resource-upload-cancel-close-" + counter.getAndIncrement());
+            t.setDaemon(true);
+            return t;
         }
     }
 }

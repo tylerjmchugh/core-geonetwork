@@ -39,17 +39,25 @@ import org.fao.geonet.utils.Log;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
-import org.springframework.http.ContentDisposition;
 
 import javax.servlet.http.HttpServletRequest;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.List;
-import java.util.concurrent.*;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -95,7 +103,7 @@ public class AsyncResourceUploadService implements DisposableBean {
      * @throws RejectedExecutionException if the background pool is saturated
      */
     public ResourceUploadTask submit(Store store, ServiceContext requestContext, String metadataUuid, URL url,
-                                      MetadataResourceVisibility visibility, Boolean approved) {
+                                     MetadataResourceVisibility visibility, Boolean approved) {
         UserSession userSession = requestContext.getUserSession();
         String language = requestContext.getLanguage();
         Integer ownerUserId = userSession != null ? userSession.getUserIdAsInt() : null;
@@ -115,7 +123,6 @@ public class AsyncResourceUploadService implements DisposableBean {
         }
 
         try {
-//            executor.execute(() -> run(store, task, url, userSession, securityContext, language, metadataUuid, visibility, approved));
             Future<?> future = executor.submit(() -> run(store, task, url, userSession, securityContext, language, metadataUuid, visibility, approved));
             futures.put(task.getId(), future);
             if (Log.isDebugEnabled(org.fao.geonet.constants.Geonet.RESOURCES)) {
@@ -129,22 +136,29 @@ public class AsyncResourceUploadService implements DisposableBean {
     }
 
     private void run(Store store, ResourceUploadTask task, URL url, UserSession userSession, SecurityContext securityContext, String language,
-                      String metadataUuid, MetadataResourceVisibility visibility, Boolean approved) {
+                     String metadataUuid, MetadataResourceVisibility visibility, Boolean approved) {
         SecurityContextHolder.setContext(securityContext);
-
-        task.start();
         ConfigurableApplicationContext appContext = ApplicationContextHolder.get();
 
-        ServiceContext context = serviceManager.createServiceContext("attachmentAsyncUpload", appContext);
-        context.setLanguage(language == null ? "eng" : language);
-        context.setUserSession(userSession);
-        context.setAsThreadLocal();
-
         try {
+            if (!task.start()) {
+                if (Log.isDebugEnabled(org.fao.geonet.constants.Geonet.RESOURCES)) {
+                    Log.debug(org.fao.geonet.constants.Geonet.RESOURCES,
+                        "Skipping async upload task " + task.getId() + " because it did not start. status=" + task.getStatus());
+                }
+                return;
+            }
+
+            ServiceContext context = serviceManager.createServiceContext("attachmentAsyncUpload", appContext);
+            context.setLanguage(language == null ? "eng" : language);
+            context.setUserSession(userSession);
+            context.setAsThreadLocal();
+
             if (Log.isDebugEnabled(org.fao.geonet.constants.Geonet.RESOURCES)) {
                 Log.debug(org.fao.geonet.constants.Geonet.RESOURCES,
                     "Starting async upload task " + task.getId() + " for metadata '" + metadataUuid + "' from URL '" + url + "'.");
             }
+
             MetadataResource resource = TransactionManager.runInTransaction(
                 "AsyncResourceUpload-" + task.getId(), appContext,
                 TransactionManager.TransactionRequirement.CREATE_NEW,
@@ -157,6 +171,10 @@ public class AsyncResourceUploadService implements DisposableBean {
                         throw new CancellationException("Resource upload task " + task.getId() + " was cancelled.");
                     }
 
+                    if (!task.startFinalizing()) {
+                        throw new CancellationException("Resource upload task " + task.getId() + " could not enter finalizing state.");
+                    }
+
                     String metadataIdString = ApiUtils.getInternalId(metadataUuid, approved);
                     if (metadataIdString != null) {
                         long metadataId = Long.parseLong(metadataIdString);
@@ -165,6 +183,7 @@ public class AsyncResourceUploadService implements DisposableBean {
                     }
                     return uploaded;
                 });
+
             // Update task with actual stored filename (in case server-stored name differs from Content-Disposition)
             task.setFilename(resource.getFilename());
             task.complete(resource);
@@ -180,6 +199,7 @@ public class AsyncResourceUploadService implements DisposableBean {
                 task.fail(e.getMessage() != null ? e.getMessage() : e.toString());
             }
         } finally {
+            task.markCancelledAfterCleanup();
             futures.remove(task.getId());
             if (Log.isDebugEnabled(org.fao.geonet.constants.Geonet.RESOURCES)) {
                 Log.debug(org.fao.geonet.constants.Geonet.RESOURCES,

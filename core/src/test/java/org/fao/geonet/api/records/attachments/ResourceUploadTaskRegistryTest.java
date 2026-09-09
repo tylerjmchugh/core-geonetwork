@@ -31,7 +31,6 @@ import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
 
 public class ResourceUploadTaskRegistryTest {
 
@@ -78,6 +77,7 @@ public class ResourceUploadTaskRegistryTest {
         ResourceUploadTask completedOld = newTask("uuid-1");
         registry.register(completedOld);
         completedOld.start();
+        completedOld.startFinalizing();
         completedOld.complete(null);
 
         ResourceUploadTask running = newTask("uuid-2");
@@ -101,6 +101,7 @@ public class ResourceUploadTaskRegistryTest {
         ResourceUploadTask oldest = newTask("uuid-1");
         registry.register(oldest);
         oldest.start();
+        oldest.startFinalizing();
         oldest.complete(null);
 
         Thread.sleep(5);
@@ -108,6 +109,7 @@ public class ResourceUploadTaskRegistryTest {
         ResourceUploadTask newest = newTask("uuid-2");
         registry.register(newest);
         newest.start();
+        newest.startFinalizing();
         newest.complete(null);
 
         // Registering a third task exceeds the cap of 2 and should evict the oldest terminal task.

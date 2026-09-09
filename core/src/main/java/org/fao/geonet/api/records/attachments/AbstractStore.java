@@ -352,9 +352,6 @@ public abstract class AbstractStore implements Store {
 
         // Check if the content length is within the allowed limit
         long contentLength = connection.getContentLengthLong();
-        if (log.isDebugEnabled()) {
-            log.debug("Uploading URL resource '{}' for metadata '{}'. advertisedContentLength={} bytes", fileUrl, metadataUuid, contentLength);
-        }
         if (contentLength > maxUploadSize) {
             throw new InputStreamLimitExceededException(maxUploadSize, contentLength);
         }

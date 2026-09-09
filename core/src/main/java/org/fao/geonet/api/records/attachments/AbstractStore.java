@@ -389,12 +389,10 @@ public abstract class AbstractStore implements Store {
         // Upload the resource while ensuring the input stream does not exceed the maximum allowed size.
         try (LimitedInputStream is = new LimitedInputStream(connection.getInputStream(), maxUploadSize, contentLength);
              ProgressReportingInputStream progressIs = new ProgressReportingInputStream(is, contentLength, listener)) {
-            MetadataResource uploadedResource = putResource(context, metadataUuid, filename, progressIs, null, visibility, approved);
-            if (log.isDebugEnabled()) {
-                log.debug("Completed URL resource upload '{}' for metadata '{}'. transferredBytes={} bytes, advertisedContentLength={} bytes",
-                    filename, metadataUuid, progressIs.getBytesTransferred(), contentLength);
-            }
-            return uploadedResource;
+
+            listener.onStreamOpened(progressIs);
+
+            return putResource(context, metadataUuid, filename, progressIs, null, visibility, approved);
         }
     }
 

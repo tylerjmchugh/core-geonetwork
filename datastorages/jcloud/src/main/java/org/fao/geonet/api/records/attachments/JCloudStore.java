@@ -399,9 +399,6 @@ public class JCloudStore extends AbstractStore {
         }
     }
 
-
-
-
     protected void setProperties(Map<String, String> properties, String metadataUuid, Date changeDate, Map<String, String> additionalProperties) {
 
         // Add additional properties if exists.

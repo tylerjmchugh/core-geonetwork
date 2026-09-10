@@ -230,15 +230,8 @@ public class CMISUtils {
             properties.put(PropertyIds.LAST_MODIFICATION_DATE, changeDate);
         }
 
-        // Resolve the declared content length to use for the upload. We can NOT rely on
-        // InputStream#available(): for network/streamed sources it only reports how many bytes
-        // are currently buffered and ready to read WITHOUT blocking (often a small, arbitrary
-        // chunk, eg. a few KB), not the total remaining size of the stream. Declaring that as the
-        // CMIS content stream length causes the repository to only read/store that many bytes,
-        // silently truncating the resource. AbstractStore#resolveExpectedSize() unwraps any
-        // KnownSizeInputStream stream decorators to find the real, already-known size first, and
-        // only fall back to available() when no known size could be determined at all.
         long isLength = AbstractStore.resolveExpectedSize(is);
+
         ContentStream contentStream = cmisConfiguration.getClient().getObjectFactory().createContentStream(key, isLength, Files.probeContentType(new File(key).toPath()), is);
 
         Document doc;

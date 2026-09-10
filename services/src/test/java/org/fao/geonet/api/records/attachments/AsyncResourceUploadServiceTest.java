@@ -54,7 +54,7 @@ public class AsyncResourceUploadServiceTest {
     }
 
     @Test
-    public void hasInProgressUploadMatchesPendingTaskByFilename() throws Exception {
+    public void hasInProgressUploadMatchesPendingTaskByFilename() {
         ResourceUploadTask existing = new ResourceUploadTask(
             "uuid-1", "http://example.test/path/report.csv", MetadataResourceVisibility.PUBLIC, false, 101);
         existing.setFilename("report.csv");
@@ -62,13 +62,13 @@ public class AsyncResourceUploadServiceTest {
 
         boolean blocked = service.hasInProgressUpload(
             "uuid-1",
-            new URL("file:/tmp/report.csv"));
+            "report.csv");
 
         assertTrue(blocked);
     }
 
     @Test
-    public void hasInProgressUploadIgnoresTerminalTask() throws Exception {
+    public void hasInProgressUploadIgnoresTerminalTask() {
         ResourceUploadTask completed = new ResourceUploadTask(
             "uuid-1", "http://example.test/path/report.csv", MetadataResourceVisibility.PUBLIC, false, 101);
         completed.setFilename("report.csv");
@@ -79,7 +79,7 @@ public class AsyncResourceUploadServiceTest {
 
         boolean blocked = service.hasInProgressUpload(
             "uuid-1",
-            new URL("file:/tmp/report.csv"));
+            "report.csv");
 
         assertFalse(blocked);
     }

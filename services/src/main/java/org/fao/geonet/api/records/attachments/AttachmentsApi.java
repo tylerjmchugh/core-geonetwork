@@ -265,7 +265,9 @@ public class AttachmentsApi {
         ServiceContext context = ApiUtils.createServiceContext(request);
         ApiUtils.canEditRecord(metadataUuid, approved, request);
 
-        if (asyncResourceUploadService.hasInProgressUpload(metadataUuid, url)) {
+        String filename = asyncResourceUploadService.resolveFilenameForUrl(url);
+
+        if (asyncResourceUploadService.hasInProgressUpload(metadataUuid, filename)) {
             throw new ResourceAlreadyExistException(String.format(
                 "An upload for url '%s' is already in progress for record '%s'. Wait for completion before retrying.",
                 url, metadataUuid
@@ -273,7 +275,7 @@ public class AttachmentsApi {
         }
 
         if (Boolean.TRUE.equals(async)) {
-            ResourceUploadTask task = asyncResourceUploadService.submit(store, context, metadataUuid, url, visibility, approved);
+            ResourceUploadTask task = asyncResourceUploadService.submit(store, context, metadataUuid, url, filename, visibility, approved);
             String location = request.getRequestURL().append("/uploads/").append(task.getId()).toString();
             return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .header(HttpHeaders.LOCATION, location)

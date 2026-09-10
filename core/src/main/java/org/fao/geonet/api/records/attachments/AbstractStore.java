@@ -246,27 +246,25 @@ public abstract class AbstractStore implements Store {
     }
 
     /**
-     * Resolves the total/expected size of {@code is}, if known, without relying on the unreliable
-     * {@link InputStream#available()} (which for network/streamed sources only reports how many
-     * bytes are currently buffered and ready to read WITHOUT blocking - often a small, arbitrary
-     * chunk - not the total remaining size of the stream; see issue #9433 / truncated uploads).
+     * Resolves the total/expected size of {@code is}, preferring an explicit known size over
+     * {@link InputStream#available()}.
      *
-     * <p>Checks the {@link KnownSizeInputStream} marker interface, which is implemented by
-     * {@link LimitedInputStream} (used for multipart/URL uploads) as well as decorators like
-     * {@link ProgressReportingInputStream} (which unwraps through to a wrapped
-     * {@code LimitedInputStream} itself), so the real size is found regardless of how many stream
-     * decorators it's wrapped in. All {@link Store} implementations should use this - shared here
-     * so every backend resolves/checks the expected upload size the same way - instead of each
-     * reimplementing (or inconsistently narrowing) the check.
+     * <p>If the stream implements {@link KnownSizeInputStream} (directly or through decorators
+     * such as {@link ProgressReportingInputStream} wrapping a {@link LimitedInputStream}), this
+     * method returns that known total size.
+     *
+     * <p>Otherwise it falls back to {@link InputStream#available()} as a best-effort value. Note
+     * that for network/streamed sources this is often only the currently buffered bytes and not
+     * the total remaining size.
      *
      * @param is the stream to inspect
-     * @return the resolved size, or {@code -1} if unknown
+     * @return the resolved size, or a best-effort available-byte count when total size is unknown
      */
-    public static long resolveExpectedSize(InputStream is) {
+    public static long resolveExpectedSize(InputStream is) throws IOException {
         if (is instanceof KnownSizeInputStream) {
             return ((KnownSizeInputStream) is).getKnownSize();
         }
-        return -1L;
+        return is.available();
     }
 
     @Override

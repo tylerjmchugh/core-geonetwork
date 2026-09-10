@@ -239,9 +239,6 @@ public class CMISUtils {
         // KnownSizeInputStream stream decorators to find the real, already-known size first, and
         // only fall back to available() when no known size could be determined at all.
         long isLength = AbstractStore.resolveExpectedSize(is);
-        if (isLength < 0) {
-            isLength = is.available();
-        }
         ContentStream contentStream = cmisConfiguration.getClient().getObjectFactory().createContentStream(key, isLength, Files.probeContentType(new File(key).toPath()), is);
 
         Document doc;

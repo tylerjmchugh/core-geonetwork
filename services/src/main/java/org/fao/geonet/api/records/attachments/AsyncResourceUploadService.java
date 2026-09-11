@@ -42,6 +42,8 @@ import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import javax.servlet.http.HttpServletRequest;
 import java.net.URL;
@@ -164,12 +166,22 @@ public class AsyncResourceUploadService implements DisposableBean {
                     "Starting async upload task " + task.getId() + " for metadata '" + metadataUuid + "' from URL '" + url + "'.");
             }
 
+            AtomicInteger transactionOutcome = new AtomicInteger(TransactionSynchronization.STATUS_UNKNOWN);
+
             MetadataResource resource = TransactionManager.runInTransaction(
                 "AsyncResourceUpload-" + task.getId(), appContext,
                 TransactionManager.TransactionRequirement.CREATE_NEW,
                 TransactionManager.CommitBehavior.ALWAYS_COMMIT,
                 false,
                 status -> {
+                    TransactionSynchronizationManager.registerSynchronization(
+                        new TransactionSynchronization() {
+                            @Override
+                            public void afterCompletion(int status) {
+                                transactionOutcome.set(status);
+                            }
+                        }
+                    );
                     MetadataResource uploaded = store.putResource(context, metadataUuid, url, visibility, approved, task);
 
                     if (task.isCancelled()) {
@@ -188,6 +200,13 @@ public class AsyncResourceUploadService implements DisposableBean {
                     }
                     return uploaded;
                 });
+
+            if (transactionOutcome.get()
+                != TransactionSynchronization.STATUS_COMMITTED) {
+                throw new IllegalStateException(
+                    "The upload transaction did not commit. "
+                        + "Check the server logs for details.");
+            }
 
             // Update task with actual stored filename (in case server-stored name differs from Content-Disposition)
             task.setFilename(resource.getFilename());

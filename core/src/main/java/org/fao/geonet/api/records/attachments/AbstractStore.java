@@ -324,53 +324,59 @@ public abstract class AbstractStore implements Store {
 
         // Open a connection to the URL
         HttpURLConnection connection = (HttpURLConnection) fileUrl.openConnection();
-        connection.setInstanceFollowRedirects(true);
-        connection.setRequestMethod("GET");
 
-        // Check if the response code is OK
-        int responseCode = connection.getResponseCode();
-        if (responseCode != HttpURLConnection.HTTP_OK) {
-            throw new IOException("Unexpected response code: " + responseCode);
-        }
+        try {
+            connection.setInstanceFollowRedirects(true);
+            connection.setRequestMethod("GET");
 
-        // Extract filename from Content-Disposition header if present otherwise use the filename from the URL
-        String contentDisposition = connection.getHeaderField(HttpHeaders.CONTENT_DISPOSITION);
-        String filename = null;
-        if (contentDisposition != null) {
-            filename = ContentDisposition.parse(contentDisposition).getFilename();
-        }
-        // If follow redirect, get the filename from the redirected URL
-        if (StringUtils.isEmpty(filename) && connection.getInstanceFollowRedirects()) {
-            URL redirectUrl = connection.getURL();
-            if (redirectUrl != null) {
-                filename = getFilenameFromUrl(redirectUrl);
+            // Check if the response code is OK
+            int responseCode = connection.getResponseCode();
+            if (responseCode != HttpURLConnection.HTTP_OK) {
+                throw new IOException("Unexpected response code: " + responseCode);
             }
-        }
-        if (StringUtils.isEmpty(filename)) {
-            filename = getFilenameFromUrl(fileUrl);
-        }
 
-        if (StringUtils.isEmpty(filename)) {
-            throw new IOException("Unable to determine filename from URL or Content-Disposition header.");
-        }
+            // Extract filename from Content-Disposition header if present otherwise use the filename from the URL
+            String contentDisposition = connection.getHeaderField(HttpHeaders.CONTENT_DISPOSITION);
+            String filename = null;
+            if (contentDisposition != null) {
+                filename = ContentDisposition.parse(contentDisposition).getFilename();
+            }
+            // If the filename is still empty, try to get it from the redirected URL (if any).
+            if (StringUtils.isEmpty(filename)) {
+                URL redirectUrl = connection.getURL();
+                if (redirectUrl != null) {
+                    filename = getFilenameFromUrl(redirectUrl);
+                }
+            }
+            // If still empty, get the filename from the original URL
+            if (StringUtils.isEmpty(filename)) {
+                filename = getFilenameFromUrl(fileUrl);
+            }
 
-        getResourceUploadTaskRegistry().resolveFilenameAndCheck(metadataUuid, filename, progressListener);
+            if (StringUtils.isEmpty(filename)) {
+                throw new IOException("Unable to determine filename from URL or Content-Disposition header.");
+            }
 
-        // Check if the content length is within the allowed limit.
-        long contentLength = connection.getContentLengthLong();
-        if (contentLength > maxUploadSize) {
-            throw new InputStreamLimitExceededException(maxUploadSize, contentLength);
-        }
+            getResourceUploadTaskRegistry().resolveFilenameAndCheck(metadataUuid, filename, progressListener);
 
-        progressListener.onProgress(0, contentLength);
+            // Check if the content length is within the allowed limit.
+            long contentLength = connection.getContentLengthLong();
+            if (contentLength > maxUploadSize) {
+                throw new InputStreamLimitExceededException(maxUploadSize, contentLength);
+            }
 
-        // Upload the resource while ensuring the input stream does not exceed the maximum allowed size.
-        try (LimitedInputStream is = new LimitedInputStream(connection.getInputStream(), maxUploadSize, contentLength);
-             ProgressReportingInputStream progressIs = new ProgressReportingInputStream(is, contentLength, progressListener)) {
+            progressListener.onProgress(0, contentLength);
 
-            progressListener.onStreamOpened(progressIs);
+            // Upload the resource while ensuring the input stream does not exceed the maximum allowed size.
+            try (LimitedInputStream is = new LimitedInputStream(connection.getInputStream(), maxUploadSize, contentLength);
+                 ProgressReportingInputStream progressIs = new ProgressReportingInputStream(is, contentLength, progressListener)) {
 
-            return putResource(context, metadataUuid, filename, progressIs, null, visibility, approved);
+                progressListener.onStreamOpened(progressIs);
+
+                return putResource(context, metadataUuid, filename, progressIs, null, visibility, approved);
+            }
+        } finally {
+            connection.disconnect();
         }
     }
 

@@ -114,7 +114,7 @@ public class ResourceUploadTaskRegistryTest {
         newest.startFinalizing();
         newest.complete(null);
 
-        // Registering a third task exceeds the cap of 2 and should evict the oldest terminal task.
+        // Registering a third task exceeds the retention target of 2 and should evict the oldest terminal task.
         ResourceUploadTask third = newTask("uuid-3");
         registry.register(third);
 

@@ -248,23 +248,27 @@ public abstract class AbstractStore implements Store {
     }
 
     /**
-     * Resolves the total/expected size of {@code is}, preferring an explicit known size over
+     * Resolves the total/expected size of {@code is}, preferring a non-negative known size over
      * {@link InputStream#available()}.
      *
      * <p>If the stream implements {@link KnownSizeInputStream} (directly or through decorators
-     * such as {@link ProgressReportingInputStream} wrapping a {@link LimitedInputStream}), this
-     * method returns that known total size.
+     * such as {@link ProgressReportingInputStream} wrapping a {@link LimitedInputStream}) and it
+     * reports a known size of zero or greater, this method returns that value.
      *
-     * <p>Otherwise it falls back to {@link InputStream#available()} as a best-effort value. Note
-     * that for network/streamed sources this is often only the currently buffered bytes and not
-     * the total remaining size.
+     * <p>If the stream reports an unknown size ({@code -1}), this method falls back to
+     * {@link InputStream#available()} as a best-effort value. For network or streamed sources,
+     * {@code available()} often only reflects the currently buffered bytes and not the total
+     * remaining size.
      *
      * @param is the stream to inspect
      * @return the resolved size, or a best-effort available-byte count when total size is unknown
      */
     public static long resolveExpectedSize(InputStream is) throws IOException {
         if (is instanceof KnownSizeInputStream) {
-            return ((KnownSizeInputStream) is).getKnownSize();
+            long knownSize = ((KnownSizeInputStream) is).getKnownSize();
+            if (knownSize >= 0) {
+                return knownSize;
+            }
         }
         return is.available();
     }

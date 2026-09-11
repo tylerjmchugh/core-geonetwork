@@ -232,6 +232,11 @@ public class AsyncResourceUploadService implements DisposableBean {
         }
     }
 
+    /**
+     * Requests cancellation of the given task.
+     *
+     * @return {@code true} if cancellation was accepted, even if the worker has not fully stopped yet
+     */
     public synchronized boolean cancel(ResourceUploadTask task) {
         if (!task.cancel()) {
             return false;
@@ -245,6 +250,10 @@ public class AsyncResourceUploadService implements DisposableBean {
         return true;
     }
 
+    /**
+     * Lists uploads for the given metadata UUID that are visible to the task owner or an
+     * Administrator.
+     */
     public List<ResourceUploadTask> listUploadsForUser(String metadataUuid, UserSession userSession) {
         return registry.getByMetadataUuid(metadataUuid).stream()
             .filter(t -> isTaskOwnerOrAdmin(t, userSession))

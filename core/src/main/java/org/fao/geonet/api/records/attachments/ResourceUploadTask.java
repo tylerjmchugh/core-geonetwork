@@ -80,6 +80,9 @@ public class ResourceUploadTask implements ResourceUploadProgressListener, Clone
     private volatile FutureTask<Void> future;
 
 
+    /**
+     * Creates a new upload task in the {@link Status#PENDING} state.
+     */
     public ResourceUploadTask(String metadataUuid, String url, MetadataResourceVisibility visibility,
                                Boolean approved, Integer ownerUserId) {
         this.metadataUuid = metadataUuid;
@@ -128,6 +131,7 @@ public class ResourceUploadTask implements ResourceUploadProgressListener, Clone
         return approved;
     }
 
+    @JsonIgnore
     public Integer getOwnerUserId() {
         return ownerUserId;
     }
@@ -183,6 +187,7 @@ public class ResourceUploadTask implements ResourceUploadProgressListener, Clone
         return error;
     }
 
+    @JsonIgnore
     public boolean isTerminal() {
         return status == Status.COMPLETED || status == Status.FAILED || status == Status.CANCELLED;
     }
@@ -195,10 +200,12 @@ public class ResourceUploadTask implements ResourceUploadProgressListener, Clone
         this.future = future;
     }
 
+    @JsonIgnore
     public boolean isFinalizing() {
         return status == Status.FINALIZING;
     }
 
+    @JsonIgnore
     public boolean isCancelling() {
         return status == Status.CANCELLING;
     }
@@ -216,6 +223,9 @@ public class ResourceUploadTask implements ResourceUploadProgressListener, Clone
         setFilename(filename);
     }
 
+    /**
+     * Transitions this task from {@link Status#PENDING} to {@link Status#UPLOADING}.
+     */
     public synchronized boolean start() {
         if (status != Status.PENDING) {
             return false;
@@ -226,6 +236,9 @@ public class ResourceUploadTask implements ResourceUploadProgressListener, Clone
         return true;
     }
 
+    /**
+     * Transitions this task from {@link Status#UPLOADING} to {@link Status#FINALIZING}.
+     */
     public synchronized boolean startFinalizing() {
         if (status != Status.UPLOADING) {
             return false;
@@ -235,6 +248,9 @@ public class ResourceUploadTask implements ResourceUploadProgressListener, Clone
         return true;
     }
 
+    /**
+     * Completes this task only when it is already {@link Status#FINALIZING}.
+     */
     public synchronized void complete(MetadataResource resource) {
         if (status != Status.FINALIZING) {
             return;
@@ -245,6 +261,9 @@ public class ResourceUploadTask implements ResourceUploadProgressListener, Clone
         status = Status.COMPLETED;
     }
 
+    /**
+     * Marks this task as {@link Status#FAILED} unless it is already terminal.
+     */
     public synchronized void fail(String errorMessage) {
         if (isTerminal()) {
             return;
@@ -255,6 +274,11 @@ public class ResourceUploadTask implements ResourceUploadProgressListener, Clone
         status = Status.FAILED;
     }
 
+    /**
+     * Cancels the task: terminal tasks are rejected, {@link Status#FINALIZING} is rejected,
+     * {@link Status#PENDING} transitions directly to {@link Status#CANCELLED}, and an active
+     * upload transitions to {@link Status#CANCELLING} while its active stream is closed.
+     */
     public boolean cancel() {
         Closeable stream;
 
@@ -284,6 +308,9 @@ public class ResourceUploadTask implements ResourceUploadProgressListener, Clone
         return true;
     }
 
+    /**
+     * Transitions a task from {@link Status#CANCELLING} to {@link Status#CANCELLED} after cleanup.
+     */
     public synchronized void markCancelledAfterCleanup() {
         if (status == Status.CANCELLING) {
             endedDateTime = new Date();

@@ -41,7 +41,6 @@ import org.apache.commons.codec.digest.DigestUtils;
 import org.fao.geonet.ApplicationContextHolder;
 import org.fao.geonet.api.ApiParams;
 import org.fao.geonet.api.ApiUtils;
-import org.fao.geonet.api.exception.ResourceAlreadyExistException;
 import org.fao.geonet.domain.AbstractMetadata;
 import org.fao.geonet.domain.MetadataResource;
 import org.fao.geonet.domain.MetadataResourceVisibility;
@@ -257,7 +256,7 @@ public class AttachmentsApi {
                 schema = @Schema(implementation = MetadataResource.class)
             )
         ),
-        @ApiResponse(responseCode = "202", description = "Attachment upload accepted and running in the background (async=true).",
+        @ApiResponse(responseCode = "202", description = "Attachment upload accepted for background processing (async=true).",
             content = @Content(schema = @Schema(implementation = ResourceUploadTask.class))),
         @ApiResponse(
             responseCode = "409",
@@ -318,7 +317,8 @@ public class AttachmentsApi {
     @io.swagger.v3.oas.annotations.Operation(summary = "List the asynchronous resource upload tasks for a record")
     @PreAuthorize("hasAuthority('Editor')")
     @RequestMapping(value = "/uploads", method = RequestMethod.GET, produces = MediaType.APPLICATION_JSON_VALUE)
-    @ApiResponses(value = {@ApiResponse(responseCode = "200", description = "Upload tasks for the record.")})
+    @ApiResponses(value = {@ApiResponse(responseCode = "200", description = "Upload tasks for the record."),
+        @ApiResponse(responseCode = "403", description = ApiParams.API_RESPONSE_NOT_ALLOWED_CAN_EDIT)})
     @ResponseBody
     public List<ResourceUploadTask> getUploadTasks(
         @Parameter(description = "The metadata UUID", required = true, example = "43d7c186-2187-4bcd-8843-41e575a5ef56") @PathVariable String metadataUuid,
@@ -356,7 +356,7 @@ public class AttachmentsApi {
         ResourceUploadTask task = asyncResourceUploadService.getOwnedTaskOrThrow(metadataUuid, taskId, request);
 
         if (!asyncResourceUploadService.cancel(task)) {
-            return ResponseEntity.status(HttpStatus.CONFLICT).body(task);
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(task.snapshot());
         }
 
         return ResponseEntity.ok(task.snapshot());

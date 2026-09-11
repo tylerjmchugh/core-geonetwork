@@ -33,7 +33,8 @@ import java.io.InterruptedIOException;
 
 /**
  * An {@link InputStream} wrapper that reports the number of bytes read so far
- * to a {@link ResourceUploadProgressListener} as the stream is consumed.
+ * to a {@link ResourceUploadProgressListener} as the stream is consumed and
+ * performs cooperative cancellation checks through the supplied listener.
  */
 public class ProgressReportingInputStream extends FilterInputStream implements KnownSizeInputStream {
 
@@ -41,6 +42,9 @@ public class ProgressReportingInputStream extends FilterInputStream implements K
     private final long totalBytes;
     private long bytesTransferred = 0;
 
+    /**
+     * Creates a progress-reporting wrapper around {@code in}.
+     */
     public ProgressReportingInputStream(InputStream in, long totalBytes, ResourceUploadProgressListener listener) {
         super(in);
         this.totalBytes = totalBytes;
@@ -82,6 +86,9 @@ public class ProgressReportingInputStream extends FilterInputStream implements K
         listener.onProgress(bytesTransferred, totalBytes);
     }
 
+    /**
+     * Returns the number of bytes successfully consumed from the wrapped stream so far.
+     */
     public long getBytesTransferred() {
         return bytesTransferred;
     }

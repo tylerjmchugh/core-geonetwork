@@ -45,10 +45,11 @@ import java.util.stream.Collectors;
  * the progress/outcome of an upload instead of keeping the originating HTTP
  * request open.
  *
- * <p>Tasks are node-local (not persisted, not shared across a cluster) and are
- * removed automatically a while after they reach a terminal state
- * ({@code COMPLETED}/{@code FAILED}/{@code CANCELLED}), or evicted early if the registry grows
- * beyond {@link #maxTasks}.
+ * <p>Tasks are node-local (not persisted and not shared across a cluster).
+ * Terminal tasks ({@code COMPLETED}/{@code FAILED}/{@code CANCELLED}) expire
+ * after the retention period, and terminal tasks may also be evicted early when
+ * the retention target is exceeded. Active tasks are never evicted for
+ * capacity.
  */
 @Component
 public class ResourceUploadTaskRegistry implements DisposableBean {
@@ -80,6 +81,9 @@ public class ResourceUploadTaskRegistry implements DisposableBean {
         sweeper.scheduleWithFixedDelay(this::sweep, SWEEP_INTERVAL_MINUTES, SWEEP_INTERVAL_MINUTES, TimeUnit.MINUTES);
     }
 
+    /**
+     * Registers or replaces a task in the node-local registry.
+     */
     public void register(ResourceUploadTask task) {
         tasks.put(task.getId(), task);
         if (tasks.size() > maxTasks) {
@@ -87,10 +91,16 @@ public class ResourceUploadTaskRegistry implements DisposableBean {
         }
     }
 
+    /**
+     * Returns the task with the given identifier, or {@code null} if it is not present.
+     */
     public ResourceUploadTask get(String taskId) {
         return tasks.get(taskId);
     }
 
+    /**
+     * Returns all tasks for the given metadata UUID, newest first.
+     */
     public List<ResourceUploadTask> getByMetadataUuid(String metadataUuid) {
         return tasks.values().stream()
             .filter(t -> t.getMetadataUuid().equals(metadataUuid))

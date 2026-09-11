@@ -24,10 +24,13 @@
  */
 package org.fao.geonet.api.records.attachments;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.fao.geonet.domain.MetadataResource;
 import org.fao.geonet.domain.MetadataResourceVisibility;
 import org.junit.Test;
 import org.mockito.Mockito;
+
+import java.io.Closeable;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -131,6 +134,54 @@ public class ResourceUploadTaskTest {
         assertTrue(task.startFinalizing());
         assertFalse(task.cancel());
         assertEquals(ResourceUploadTask.Status.FINALIZING, task.getStatus());
+    }
+
+    @Test
+    public void cancellingActiveUploadClosesRegisteredStream() throws Exception {
+        ResourceUploadTask task = new ResourceUploadTask("uuid-1", "https://example.org/file.zip",
+            MetadataResourceVisibility.PUBLIC, false, 42);
+        Closeable stream = Mockito.mock(Closeable.class);
+
+        task.start();
+        task.onStreamOpened(stream);
+
+        assertTrue(task.cancel());
+        Mockito.verify(stream).close();
+        assertEquals(ResourceUploadTask.Status.CANCELLING, task.getStatus());
+    }
+
+    @Test
+    public void streamOpenedAfterCancellationIsClosedImmediately() throws Exception {
+        ResourceUploadTask task = new ResourceUploadTask("uuid-1", "https://example.org/file.zip",
+            MetadataResourceVisibility.PUBLIC, false, 42);
+        Closeable stream = Mockito.mock(Closeable.class);
+
+        task.start();
+        assertTrue(task.cancel());
+
+        task.onStreamOpened(stream);
+
+        Mockito.verify(stream).close();
+        assertEquals(ResourceUploadTask.Status.CANCELLING, task.getStatus());
+    }
+
+    @Test
+    public void jsonSerializationHidesInternalHelperProperties() throws Exception {
+        ResourceUploadTask task = new ResourceUploadTask("uuid-1", "https://example.org/file.zip",
+            MetadataResourceVisibility.PUBLIC, false, 42);
+
+        String json = new ObjectMapper().writeValueAsString(task);
+
+        assertTrue(json.contains("\"status\""));
+        assertTrue(json.contains("\"id\""));
+        assertTrue(json.contains("\"metadataUuid\""));
+        assertFalse(json.contains("ownerUserId"));
+        assertFalse(json.contains("terminal"));
+        assertFalse(json.contains("finalizing"));
+        assertFalse(json.contains("cancelling"));
+        assertFalse(json.contains("cancelled"));
+        assertFalse(json.contains("future"));
+        assertFalse(json.contains("activeStream"));
     }
 
     @Test

@@ -27,13 +27,17 @@ package org.fao.geonet.api.records.attachments;
 import org.fao.geonet.util.LimitedInputStream;
 import org.junit.Test;
 
+import java.io.Closeable;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.fail;
 
 public class ProgressReportingInputStreamTest {
 
@@ -90,6 +94,53 @@ public class ProgressReportingInputStreamTest {
                 // consume, must not throw despite the null listener
             }
         }
+    }
+
+    @Test
+    public void throwsInterruptedIOExceptionWhenListenerReportsCancellation() throws IOException {
+        byte[] data = new byte[]{1, 2, 3};
+        ResourceUploadProgressListener listener = new ResourceUploadProgressListener() {
+            @Override
+            public void onProgress(long bytesTransferred, long totalBytes) {
+                // no-op
+            }
+
+            @Override
+            public boolean isCancelled() {
+                return true;
+            }
+        };
+
+        try (ProgressReportingInputStream is = new ProgressReportingInputStream(new ByteArrayInputStream(data), data.length, listener)) {
+            try {
+                is.read();
+                fail("Expected InterruptedIOException");
+            } catch (InterruptedIOException expected) {
+                // expected
+            }
+        }
+    }
+
+    @Test
+    public void notifiesListenerWhenStreamIsClosed() throws IOException {
+        byte[] data = new byte[]{1, 2, 3};
+        Closeable[] closedStream = new Closeable[1];
+        ResourceUploadProgressListener listener = new ResourceUploadProgressListener() {
+            @Override
+            public void onProgress(long bytesTransferred, long totalBytes) {
+                // no-op
+            }
+
+            @Override
+            public void onStreamClosed(Closeable stream) {
+                closedStream[0] = stream;
+            }
+        };
+
+        ProgressReportingInputStream is = new ProgressReportingInputStream(new ByteArrayInputStream(data), data.length, listener);
+        is.close();
+
+        assertSame(is, closedStream[0]);
     }
 
     @Test

@@ -70,8 +70,8 @@ public interface ResourceUploadProgressListener {
     }
 
     /**
-     * Called when the stream to the store is closed. This can be used to perform any
-     * necessary cleanup or finalization after the upload is complete.
+     * Called when the stream to the store is closed after completion, failure, or cancellation.
+     * This can be used to perform any necessary cleanup or finalization.
      *
      * @param stream The stream that has been closed.
      */

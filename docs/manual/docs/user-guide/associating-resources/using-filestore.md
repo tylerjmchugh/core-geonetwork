@@ -67,6 +67,9 @@ The response also includes a `Location` header pointing at the task status URL. 
 terminal states: `COMPLETED`, `FAILED`, or `CANCELLED`. `GET .../api/records/{metadataUuid}/attachments/uploads`
 lists the upload tasks for a record.
 
+Access to task status, listing, and cancellation is restricted to the user who submitted the task
+or an Administrator, and the caller must still have edit access to the metadata record.
+
 Status values and meanings:
 
 | Status       | Meaning                                                               |
@@ -88,5 +91,9 @@ Notes:
 - If the remote resource size is unknown, `totalBytes` is `-1` and `percentComplete` is `null`.
 - An asynchronous request can initially return `202 Accepted` and later become `FAILED` if its
   resolved filename conflicts with another active upload.
-- Task state is held in memory on the node handling the request and is lost on restart.
+- Terminal tasks are retained for approximately 30 minutes and are cleaned up periodically, so they
+  may remain visible for a little longer than 30 minutes.
+- Task state is held in memory on the node handling the request and is lost on restart. In a
+  clustered deployment, subsequent polling requests must reach the same node that accepted the
+  upload.
 

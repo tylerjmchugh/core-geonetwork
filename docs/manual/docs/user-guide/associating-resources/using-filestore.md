@@ -52,7 +52,7 @@ description:
   "id": "5f2c5b6e-...",
   "metadataUuid": "43d7c186-2187-4bcd-8843-41e575a5ef56",
   "url": "https://example.org/big-file.zip",
-  "status": "RUNNING",
+  "status": "UPLOADING",
   "bytesTransferred": 10485760,
   "totalBytes": 104857600,
   "percentComplete": 10,
@@ -63,11 +63,30 @@ description:
 ```
 
 The response also includes a `Location` header pointing at the task status URL. Poll
-`GET .../api/records/{metadataUuid}/attachments/uploads/{taskId}` until `status` is `COMPLETED`
-(the created attachment is available in the `resource` field) or `FAILED` (see `error`).
-`GET .../api/records/{metadataUuid}/attachments/uploads` lists the upload tasks for a record.
+`GET .../api/records/{metadataUuid}/attachments/uploads/{taskId}` until the task reaches one of the
+terminal states: `COMPLETED`, `FAILED`, or `CANCELLED`. `GET .../api/records/{metadataUuid}/attachments/uploads`
+lists the upload tasks for a record.
 
-Only the user who started the upload, or an Administrator, can view its task. Task state is kept
-in memory on the node that accepted the request: it does not survive a restart and, in a
-clustered deployment, must be polled on the same node.
+Status values and meanings:
+
+| Status       | Meaning                                                               |
+| ------------ | --------------------------------------------------------------------- |
+| `PENDING`    | Waiting for an upload worker.                                         |
+| `UPLOADING`  | Downloading or storing the resource.                                  |
+| `FINALIZING` | Finishing the upload transaction; cancellation is no longer accepted. |
+| `CANCELLING` | Cancellation was requested; the worker is still stopping.             |
+| `COMPLETED`  | The upload succeeded. The attachment description is in `resource`.    |
+| `FAILED`     | The upload failed. See `error`.                                       |
+| `CANCELLED`  | The upload worker has stopped following cancellation.                 |
+
+Notes:
+
+- Send `DELETE` to the task URL to request cancellation.
+- A successful `DELETE` may return a task whose status is still `CANCELLING`.
+- Continue polling after cancellation until the task reaches a terminal state.
+- `percentComplete == 100` does not mean the task is `COMPLETED`; it may still be `FINALIZING`.
+- If the remote resource size is unknown, `totalBytes` is `-1` and `percentComplete` is `null`.
+- An asynchronous request can initially return `202 Accepted` and later become `FAILED` if its
+  resolved filename conflicts with another active upload.
+- Task state is held in memory on the node handling the request and is lost on restart.
 

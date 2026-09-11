@@ -249,11 +249,23 @@ public class AttachmentsApi {
     @PreAuthorize("hasAuthority('Editor')")
     @RequestMapping(method = RequestMethod.PUT,
         produces = MediaType.APPLICATION_JSON_VALUE)
-    @ApiResponses(value = {@ApiResponse(responseCode = "201", description = "Attachment added."),
+    @ApiResponses(value = {
+        @ApiResponse(
+            responseCode = "201",
+            description = "Attachment added.",
+            content = @Content(
+                schema = @Schema(implementation = MetadataResource.class)
+            )
+        ),
         @ApiResponse(responseCode = "202", description = "Attachment upload accepted and running in the background (async=true).",
             content = @Content(schema = @Schema(implementation = ResourceUploadTask.class))),
-        @ApiResponse(responseCode = "409", description = "An upload for the same record/file is already running. Wait for completion before retrying."),
-        @ApiResponse(responseCode = "403", description = ApiParams.API_RESPONSE_NOT_ALLOWED_CAN_EDIT)})
+        @ApiResponse(
+            responseCode = "409",
+            description = "Synchronous upload conflicts with an active upload. "
+                + "Asynchronous conflicts are reported through the task status."
+        ),
+        @ApiResponse(responseCode = "403", description = ApiParams.API_RESPONSE_NOT_ALLOWED_CAN_EDIT)
+    })
     @ResponseBody
     public ResponseEntity<?> putResourceFromURL(
         @Parameter(description = "The metadata UUID", required = true, example = "43d7c186-2187-4bcd-8843-41e575a5ef56") @PathVariable String metadataUuid,
@@ -329,10 +341,10 @@ public class AttachmentsApi {
         produces = MediaType.APPLICATION_JSON_VALUE
     )
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Upload cancelled."),
+        @ApiResponse(responseCode = "200", description = "Cancellation accepted; the task may still be stopping."),
         @ApiResponse(responseCode = "403", description = ApiParams.API_RESPONSE_NOT_ALLOWED_CAN_EDIT),
         @ApiResponse(responseCode = "404", description = "Unknown or expired upload task."),
-        @ApiResponse(responseCode = "409", description = "Upload has already finished.")
+        @ApiResponse(responseCode = "409", description = "The upload is finalizing or has already finished.")
     })
     @ResponseBody
     public ResponseEntity<ResourceUploadTask> cancelUploadTask(

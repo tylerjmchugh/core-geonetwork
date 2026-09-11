@@ -33,11 +33,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.util.Date;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.FutureTask;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Tracks the state of an asynchronous "upload a resource from a URL" request
@@ -61,9 +57,6 @@ public class ResourceUploadTask implements ResourceUploadProgressListener, Clone
         FAILED,
         CANCELLED
     }
-
-    private static final ExecutorService STREAM_CLOSE_EXECUTOR = Executors.newCachedThreadPool(
-        new CancellationThreadFactory());
 
     private final String id = UUID.randomUUID().toString();
     private final String metadataUuid;
@@ -285,7 +278,7 @@ public class ResourceUploadTask implements ResourceUploadProgressListener, Clone
         }
 
         if (stream != null) {
-            closeStreamAsync(stream);
+            closeStream(stream);
         }
 
         return true;
@@ -308,7 +301,7 @@ public class ResourceUploadTask implements ResourceUploadProgressListener, Clone
         activeStream = stream;
 
         if (isCancelled()) {
-            closeStreamAsync(stream);
+            closeStream(stream);
         }
     }
 
@@ -319,24 +312,11 @@ public class ResourceUploadTask implements ResourceUploadProgressListener, Clone
         }
     }
 
-    private void closeStreamAsync(Closeable stream) {
-        STREAM_CLOSE_EXECUTOR.execute(() -> {
-            try {
-                stream.close();
-            } catch (IOException ignored) {
-                // Task cancellation already requested.
-            }
-        });
-    }
-
-    private static class CancellationThreadFactory implements ThreadFactory {
-        private final AtomicInteger counter = new AtomicInteger(1);
-
-        @Override
-        public Thread newThread(Runnable r) {
-            Thread t = new Thread(r, "resource-upload-cancel-close-" + counter.getAndIncrement());
-            t.setDaemon(true);
-            return t;
+    private void closeStream(Closeable stream) {
+        try {
+            stream.close();
+        } catch (IOException ignored) {
+            // Cancellation has already been requested.
         }
     }
 }

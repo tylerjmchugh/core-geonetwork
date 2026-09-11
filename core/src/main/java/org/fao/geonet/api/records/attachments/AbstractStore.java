@@ -354,29 +354,21 @@ public abstract class AbstractStore implements Store {
             throw new IOException("Unable to determine filename from URL or Content-Disposition header.");
         }
 
-        progressListener.onFilenameResolved(filename);
+        getResourceUploadTaskRegistry().resolveFilenameAndCheck(metadataUuid, filename, progressListener);
 
-        if (hasInProgressUploadForFilename(metadataUuid, filename, progressListener)) {
-            throw new ResourceAlreadyExistException(String.format(
-                "An upload for filename '%s' is already in progress for record '%s'. Wait for completion before retrying.",
-                filename, metadataUuid
-            ));
-        }
-
-        // Check if the content length is within the allowed limit
+        // Check if the content length is within the allowed limit.
         long contentLength = connection.getContentLengthLong();
         if (contentLength > maxUploadSize) {
             throw new InputStreamLimitExceededException(maxUploadSize, contentLength);
         }
 
-        ResourceUploadProgressListener listener = progressListener != null ? progressListener : ResourceUploadProgressListener.NO_OP;
-        listener.onProgress(0, contentLength);
+        progressListener.onProgress(0, contentLength);
 
         // Upload the resource while ensuring the input stream does not exceed the maximum allowed size.
         try (LimitedInputStream is = new LimitedInputStream(connection.getInputStream(), maxUploadSize, contentLength);
-             ProgressReportingInputStream progressIs = new ProgressReportingInputStream(is, contentLength, listener)) {
+             ProgressReportingInputStream progressIs = new ProgressReportingInputStream(is, contentLength, progressListener)) {
 
-            listener.onStreamOpened(progressIs);
+            progressListener.onStreamOpened(progressIs);
 
             return putResource(context, metadataUuid, filename, progressIs, null, visibility, approved);
         }
@@ -459,14 +451,6 @@ public abstract class AbstractStore implements Store {
             // It was a filename
             return resourceId;
         }
-    }
-
-    protected boolean hasInProgressUploadForFilename(String metadataUuid, String filename, ResourceUploadProgressListener progressListener) {
-        ResourceUploadTaskRegistry registry = getResourceUploadTaskRegistry();
-        return registry.getByMetadataUuid(metadataUuid).stream()
-            .filter(task -> task != progressListener)
-            .filter(task -> !task.isTerminal())
-            .anyMatch(task -> filename.equals(task.getFilename()));
     }
 
     protected void checkResourceId(final String resourceId) {

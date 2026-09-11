@@ -24,6 +24,7 @@
  */
 package org.fao.geonet.api.records.attachments;
 
+import org.fao.geonet.api.exception.ResourceAlreadyExistException;
 import org.fao.geonet.constants.Geonet;
 import org.fao.geonet.utils.Log;
 import org.springframework.beans.factory.DisposableBean;
@@ -112,6 +113,36 @@ public class ResourceUploadTaskRegistry implements DisposableBean {
             .filter(ResourceUploadTask::isTerminal)
             .min(Comparator.comparing(ResourceUploadTask::getEndedDateTime))
             .ifPresent(t -> tasks.remove(t.getId()));
+    }
+
+    /**
+     * Resolves the filename for a resource upload and checks for duplicates.
+     *
+     * @param metadataUuid     The UUID of the metadata record associated with the upload.
+     * @param filename         The resolved filename of the uploaded resource.
+     * @param progressListener The listener to report progress and check for duplicates.
+     * @throws ResourceAlreadyExistException If a duplicate upload is detected for the same filename and metadata UUID.
+     */
+    public synchronized void resolveFilenameAndCheck(
+        String metadataUuid,
+        String filename,
+        ResourceUploadProgressListener progressListener)
+        throws ResourceAlreadyExistException {
+
+        progressListener.onFilenameResolved(filename);
+
+        boolean duplicate = getByMetadataUuid(metadataUuid).stream()
+            .filter(task -> task != progressListener)
+            .filter(task -> !task.isTerminal())
+            .anyMatch(task -> filename.equals(task.getFilename()));
+
+        if (duplicate) {
+            throw new ResourceAlreadyExistException(String.format(
+                "An upload for filename '%s' is already in progress for record '%s'. "
+                    + "Wait for completion before retrying.",
+                filename, metadataUuid
+            ));
+        }
     }
 
     @Override

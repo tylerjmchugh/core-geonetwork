@@ -356,7 +356,7 @@ public abstract class AbstractStore implements Store {
 
         progressListener.onFilenameResolved(filename);
 
-        if (hasInProgressUploadForFilename(metadataUuid, filename)) {
+        if (hasInProgressUploadForFilename(metadataUuid, filename, progressListener)) {
             throw new ResourceAlreadyExistException(String.format(
                 "An upload for filename '%s' is already in progress for record '%s'. Wait for completion before retrying.",
                 filename, metadataUuid
@@ -461,9 +461,10 @@ public abstract class AbstractStore implements Store {
         }
     }
 
-    protected boolean hasInProgressUploadForFilename(String metadataUuid, String filename) {
+    protected boolean hasInProgressUploadForFilename(String metadataUuid, String filename, ResourceUploadProgressListener progressListener) {
         ResourceUploadTaskRegistry registry = getResourceUploadTaskRegistry();
         return registry.getByMetadataUuid(metadataUuid).stream()
+            .filter(task -> task != progressListener)
             .filter(task -> !task.isTerminal())
             .anyMatch(task -> filename.equals(task.getFilename()));
     }

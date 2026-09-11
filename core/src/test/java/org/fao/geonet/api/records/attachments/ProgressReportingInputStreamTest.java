@@ -24,6 +24,7 @@
  */
 package org.fao.geonet.api.records.attachments;
 
+import org.fao.geonet.util.LimitedInputStream;
 import org.junit.Test;
 
 import java.io.ByteArrayInputStream;
@@ -89,5 +90,27 @@ public class ProgressReportingInputStreamTest {
                 // consume, must not throw despite the null listener
             }
         }
+    }
+
+    @Test
+    public void resolveExpectedSizeUsesKnownSizeThroughProgressWrapper() throws IOException {
+        byte[] data = new byte[10];
+
+        LimitedInputStream limited = new LimitedInputStream(new ByteArrayInputStream(data), 100, 10);
+
+        ProgressReportingInputStream progress = new ProgressReportingInputStream(limited, 10, null);
+
+        assertEquals(10, AbstractStore.resolveExpectedSize(progress));
+    }
+
+    @Test
+    public void resolveExpectedSizeFallsBackToAvailableWhenSizeUnknown() throws IOException {
+        byte[] data = new byte[10];
+
+        LimitedInputStream limited = new LimitedInputStream(new ByteArrayInputStream(data), 100, -1);
+
+        ProgressReportingInputStream progress = new ProgressReportingInputStream(limited, -1, null);
+
+        assertEquals(10, AbstractStore.resolveExpectedSize(progress));
     }
 }

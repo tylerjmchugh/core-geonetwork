@@ -33,6 +33,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertNotNull;
 
 public class ResourceUploadTaskTest {
 
@@ -130,5 +131,62 @@ public class ResourceUploadTaskTest {
         assertTrue(task.startFinalizing());
         assertFalse(task.cancel());
         assertEquals(ResourceUploadTask.Status.FINALIZING, task.getStatus());
+    }
+
+    @Test
+    public void snapshotIsStableAfterOriginalChanges() {
+        ResourceUploadTask task = new ResourceUploadTask("uuid-1", "https://example.org/file.zip",
+            MetadataResourceVisibility.PUBLIC, false, 42);
+
+        // Start and set some progress and filename
+        task.start();
+        task.setFilename("big-file.zip");
+        task.onProgress(10, 100);
+
+        ResourceUploadTask snapshot = task.snapshot();
+
+        // Mutate the original task to completion
+        task.startFinalizing();
+        MetadataResource resource = Mockito.mock(MetadataResource.class);
+        task.complete(resource);
+
+        // Snapshot should remain as it was when taken
+        assertEquals(ResourceUploadTask.Status.UPLOADING, snapshot.getStatus());
+        assertEquals("big-file.zip", snapshot.getFilename());
+        assertEquals(Integer.valueOf(10), snapshot.getPercentComplete());
+        assertNull(snapshot.getResource());
+        assertNull(snapshot.getEndedDateTime());
+    }
+
+    @Test
+    public void terminalStatesHaveEndedDateTime() {
+        // COMPLETED
+        ResourceUploadTask completed = new ResourceUploadTask("uuid-1", "https://example.org/file.zip",
+            MetadataResourceVisibility.PUBLIC, false, 42);
+        completed.start();
+        completed.startFinalizing();
+        completed.complete(Mockito.mock(MetadataResource.class));
+        assertNotNull(completed.getEndedDateTime());
+
+        // FAILED
+        ResourceUploadTask failed = new ResourceUploadTask("uuid-2", "https://example.org/file.zip",
+            MetadataResourceVisibility.PUBLIC, false, 42);
+        failed.start();
+        failed.fail("boom");
+        assertNotNull(failed.getEndedDateTime());
+
+        // CANCELLED directly from PENDING
+        ResourceUploadTask cancelledDirect = new ResourceUploadTask("uuid-3", "https://example.org/file.zip",
+            MetadataResourceVisibility.PUBLIC, false, 42);
+        cancelledDirect.cancel();
+        assertNotNull(cancelledDirect.getEndedDateTime());
+
+        // CANCELLED after CANCELLING
+        ResourceUploadTask cancelledAfter = new ResourceUploadTask("uuid-4", "https://example.org/file.zip",
+            MetadataResourceVisibility.PUBLIC, false, 42);
+        cancelledAfter.start();
+        cancelledAfter.cancel();
+        cancelledAfter.markCancelledAfterCleanup();
+        assertNotNull(cancelledAfter.getEndedDateTime());
     }
 }

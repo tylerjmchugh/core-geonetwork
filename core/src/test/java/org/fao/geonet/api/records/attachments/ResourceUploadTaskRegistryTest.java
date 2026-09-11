@@ -24,6 +24,7 @@
  */
 package org.fao.geonet.api.records.attachments;
 
+import org.fao.geonet.api.exception.ResourceAlreadyExistException;
 import org.fao.geonet.domain.MetadataResourceVisibility;
 import org.junit.Test;
 
@@ -31,6 +32,7 @@ import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.fail;
 
 public class ResourceUploadTaskRegistryTest {
 
@@ -121,6 +123,35 @@ public class ResourceUploadTaskRegistryTest {
         assertEquals(third, registry.get(third.getId()));
 
         registry.destroy();
+    }
+
+    @Test
+    public void competingFilenameClaimsAreDetectedAndRetained() throws Exception {
+        ResourceUploadTaskRegistry registry = new ResourceUploadTaskRegistry();
+        try {
+            ResourceUploadTask first = newTask("uuid-1");
+            ResourceUploadTask second = newTask("uuid-1");
+            registry.register(first);
+            registry.register(second);
+
+            String filename = "conflict.txt";
+
+            // First claim should succeed and set the filename on the first task
+            registry.resolveFilenameAndCheck("uuid-1", filename, first);
+            // Second claim should be rejected
+            try {
+                registry.resolveFilenameAndCheck("uuid-1", filename, second);
+                fail("Expected ResourceAlreadyExistException for competing filename claim");
+            } catch (ResourceAlreadyExistException expected) {
+                // expected
+            }
+
+            // Both tasks should retain the resolved filename
+            assertEquals(filename, first.getFilename());
+            assertEquals(filename, second.getFilename());
+        } finally {
+            registry.destroy();
+        }
     }
 
     private static long TimeUnit_HOUR_MILLIS() {

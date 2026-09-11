@@ -39,8 +39,6 @@ import org.fao.geonet.kernel.setting.SettingManager;
 import org.fao.geonet.languages.IsoLanguagesMapper;
 import org.fao.geonet.lib.Lib;
 import org.fao.geonet.resources.JCloudConfiguration;
-import org.fao.geonet.util.KnownSizeInputStream;
-import org.fao.geonet.util.LimitedInputStream;
 import org.fao.geonet.utils.Log;
 import org.jclouds.blobstore.ContainerNotFoundException;
 import org.jclouds.blobstore.domain.*;

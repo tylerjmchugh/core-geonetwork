@@ -47,17 +47,17 @@ import java.util.stream.Collectors;
  *
  * <p>Tasks are node-local (not persisted, not shared across a cluster) and are
  * removed automatically a while after they reach a terminal state
- * ({@code COMPLETED}/{@code FAILED}), or evicted early if the registry grows
+ * ({@code COMPLETED}/{@code FAILED}/{@code CANCELLED}), or evicted early if the registry grows
  * beyond {@link #maxTasks}.
  */
 @Component
 public class ResourceUploadTaskRegistry implements DisposableBean {
 
-    /** How long a terminal (completed/failed) task is kept available for polling. */
+    /** How long a terminal (completed/failed/cancelled) task is kept available for polling. */
     static final long TERMINAL_TASK_TTL_MINUTES = 30;
     /** How often the sweep for expired terminal tasks runs. */
     private static final long SWEEP_INTERVAL_MINUTES = 5;
-    /** Hard cap on the number of tasks retained at once, to bound memory use. */
+    /** Retention target; active tasks are never evicted. */
     private static final int MAX_TASKS = 500;
 
     private final Map<String, ResourceUploadTask> tasks = new ConcurrentHashMap<>();

@@ -262,7 +262,7 @@ public class AsyncResourceUploadService implements DisposableBean {
      * @throws SecurityException         if the user does not own the task and is not an admin
      */
     public ResourceUploadTask getOwnedTaskOrThrow(String metadataUuid, String taskId, HttpServletRequest request) throws Exception {
-        ResourceUploadTask task = registry == null ? null : registry.get(taskId);
+        ResourceUploadTask task = registry.get(taskId);
         if (task == null || !task.getMetadataUuid().equals(metadataUuid)) {
             throw new ResourceNotFoundException(String.format("Upload task '%s' not found for record '%s'.", taskId, metadataUuid));
         }

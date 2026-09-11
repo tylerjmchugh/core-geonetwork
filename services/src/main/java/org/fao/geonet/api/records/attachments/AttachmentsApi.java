@@ -84,6 +84,7 @@ import java.net.URL;
 import java.time.ZonedDateTime;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Metadata resource related operations.
@@ -270,7 +271,7 @@ public class AttachmentsApi {
             String location = request.getRequestURL().append("/uploads/").append(task.getId()).toString();
             return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .header(HttpHeaders.LOCATION, location)
-                .body(task);
+                .body(task.snapshot());
         }
 
         MetadataResource resource = store.putResource(context, metadataUuid, url, visibility, approved);
@@ -299,7 +300,7 @@ public class AttachmentsApi {
         @Parameter(description = "The upload task identifier", required = true) @PathVariable String taskId,
         @Parameter(hidden = true) HttpServletRequest request) throws Exception {
         ApiUtils.canEditRecord(metadataUuid, request);
-        return asyncResourceUploadService.getOwnedTaskOrThrow(metadataUuid, taskId, request);
+        return asyncResourceUploadService.getOwnedTaskOrThrow(metadataUuid, taskId, request).snapshot();
     }
 
     @io.swagger.v3.oas.annotations.Operation(summary = "List the asynchronous resource upload tasks for a record")
@@ -312,7 +313,10 @@ public class AttachmentsApi {
         @Parameter(hidden = true) HttpServletRequest request) throws Exception {
         ApiUtils.canEditRecord(metadataUuid, request);
         UserSession userSession = ApiUtils.getUserSession(request.getSession());
-        return asyncResourceUploadService.listUploadsForUser(metadataUuid, userSession);
+        return asyncResourceUploadService.listUploadsForUser(metadataUuid, userSession)
+            .stream()
+            .map(ResourceUploadTask::snapshot)
+            .collect(Collectors.toList());
     }
 
     @io.swagger.v3.oas.annotations.Operation(
@@ -343,7 +347,7 @@ public class AttachmentsApi {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(task);
         }
 
-        return ResponseEntity.ok(task);
+        return ResponseEntity.ok(task.snapshot());
     }
 
     @io.swagger.v3.oas.annotations.Operation(summary = "Get a metadata resource")

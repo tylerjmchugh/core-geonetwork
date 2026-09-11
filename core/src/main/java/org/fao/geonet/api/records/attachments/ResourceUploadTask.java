@@ -50,7 +50,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * a clustered deployment, only visible on the node that accepted the request.
  */
 @JsonPropertyOrder(alphabetic = true)
-public class ResourceUploadTask implements ResourceUploadProgressListener {
+public class ResourceUploadTask implements ResourceUploadProgressListener, Cloneable {
 
     public enum Status {
         PENDING,
@@ -96,6 +96,25 @@ public class ResourceUploadTask implements ResourceUploadProgressListener {
         this.ownerUserId = ownerUserId;
     }
 
+    /**
+     * Creates a snapshot of the current task state. The returned copy is safe to
+     * return to clients without exposing internal execution resources (eg. the
+     * {@link FutureTask} or active stream).
+     */
+    public synchronized ResourceUploadTask snapshot() {
+        try {
+            ResourceUploadTask copy = (ResourceUploadTask) super.clone();
+
+            // Execution resources belong only to the original task.
+            copy.future = null;
+            copy.activeStream = null;
+
+            return copy;
+        } catch (CloneNotSupportedException e) {
+            throw new AssertionError(e);
+        }
+    }
+
     public String getId() {
         return id;
     }
@@ -128,7 +147,7 @@ public class ResourceUploadTask implements ResourceUploadProgressListener {
         return filename;
     }
 
-    public void setFilename(String filename) {
+    public synchronized void setFilename(String filename) {
         this.filename = filename;
     }
 
@@ -192,7 +211,7 @@ public class ResourceUploadTask implements ResourceUploadProgressListener {
     }
 
     @Override
-    public void onProgress(long bytesTransferred, long totalBytes) {
+    public synchronized void onProgress(long bytesTransferred, long totalBytes) {
         if (!isCancelled()) {
             this.bytesTransferred = bytesTransferred;
             this.totalBytes = totalBytes;
@@ -229,8 +248,8 @@ public class ResourceUploadTask implements ResourceUploadProgressListener {
         }
 
         this.resource = resource;
-        status = Status.COMPLETED;
         endedDateTime = new Date();
+        status = Status.COMPLETED;
     }
 
     public synchronized void fail(String errorMessage) {
@@ -239,8 +258,8 @@ public class ResourceUploadTask implements ResourceUploadProgressListener {
         }
 
         error = errorMessage;
-        status = Status.FAILED;
         endedDateTime = new Date();
+        status = Status.FAILED;
     }
 
     public boolean cancel() {
@@ -256,8 +275,8 @@ public class ResourceUploadTask implements ResourceUploadProgressListener {
             }
 
             if (status == Status.PENDING) {
-                status = Status.CANCELLED;
                 endedDateTime = new Date();
+                status = Status.CANCELLED;
                 return true;
             }
 
@@ -274,8 +293,8 @@ public class ResourceUploadTask implements ResourceUploadProgressListener {
 
     public synchronized void markCancelledAfterCleanup() {
         if (status == Status.CANCELLING) {
-            status = Status.CANCELLED;
             endedDateTime = new Date();
+            status = Status.CANCELLED;
         }
     }
 

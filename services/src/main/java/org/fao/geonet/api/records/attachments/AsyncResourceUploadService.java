@@ -102,7 +102,7 @@ public class AsyncResourceUploadService implements DisposableBean {
      * @return the newly created, registered task (initially {@code PENDING})
      * @throws RejectedExecutionException if the background pool is saturated
      */
-    public ResourceUploadTask submit(Store store, ServiceContext requestContext, String metadataUuid, URL url, String filename,
+    public ResourceUploadTask submit(Store store, ServiceContext requestContext, String metadataUuid, URL url,
                                      MetadataResourceVisibility visibility, Boolean approved) {
         UserSession userSession = requestContext.getUserSession();
         String language = requestContext.getLanguage();
@@ -111,9 +111,6 @@ public class AsyncResourceUploadService implements DisposableBean {
         SecurityContext securityContext = SecurityContextHolder.getContext();
 
         ResourceUploadTask task = new ResourceUploadTask(metadataUuid, url.toString(), visibility, approved, ownerUserId);
-        if (filename != null) {
-            task.setFilename(filename);
-        }
         registry.register(task);
         if (Log.isDebugEnabled(org.fao.geonet.constants.Geonet.RESOURCES)) {
             Log.debug(org.fao.geonet.constants.Geonet.RESOURCES,
@@ -227,41 +224,6 @@ public class AsyncResourceUploadService implements DisposableBean {
     }
 
     /**
-     * Get the filename from the remote URL's Content-Disposition header via HEAD request.
-     * Falls back to extracting from URL path if the header is not available or HEAD fails.
-     *
-     * @return the filename, or null if it cannot be determined
-     */
-    public String resolveFilenameForUrl(URL url) {
-        String filename = extractFilenameFromContentDisposition(url);
-        if (filename != null) {
-            return filename;
-        }
-
-        // Fall back to extracting filename from URL path
-        return extractFilenameFromUrl(url);
-    }
-
-    /**
-     * Check if there is an in-progress (non-terminal) upload task for the given metadata UUID and filename.
-     *
-     * @param metadataUuid the metadata UUID
-     * @param filename     the filename to check (can be null)
-     * @return true if there is an in-progress upload task with the same filename, false otherwise
-     */
-    public boolean hasInProgressUpload(String metadataUuid, String filename) {
-        return registry.getByMetadataUuid(metadataUuid).stream()
-            .filter(task -> !task.isTerminal())
-            .anyMatch(task -> {
-                String taskFilename = task.getFilename();
-                if (filename != null && taskFilename != null) {
-                    return filename.equals(taskFilename);
-                }
-                return false;
-            });
-    }
-
-    /**
      * Get an upload task by ID and verify that it belongs to the given metadata UUID and is owned by the current user (or admin).
      *
      * @param metadataUuid the metadata UUID
@@ -299,47 +261,6 @@ public class AsyncResourceUploadService implements DisposableBean {
             return true;
         }
         return task.getOwnerUserId() != null && task.getOwnerUserId().equals(userSession.getUserIdAsInt());
-    }
-
-    /**
-     * Extract a filename from a URL path. Returns the last path segment, or null if empty.
-     */
-    private String extractFilenameFromUrl(URL url) {
-        String path = url.getPath();
-        if (path == null || path.isEmpty()) {
-            return null;
-        }
-
-        String filename = path.substring(path.lastIndexOf('/') + 1);
-
-        // Remove query string
-        int queryIndex = filename.indexOf('?');
-        if (queryIndex > 0) {
-            filename = filename.substring(0, queryIndex);
-        }
-
-        return filename.isEmpty() ? null : filename;
-    }
-
-    private String extractFilenameFromContentDisposition(URL url) {
-        try {
-            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-            connection.setRequestMethod("HEAD");
-            connection.setInstanceFollowRedirects(true);
-
-            if (connection.getResponseCode() == HttpURLConnection.HTTP_OK) {
-                String contentDisposition = connection.getHeaderField(HttpHeaders.CONTENT_DISPOSITION);
-                if (contentDisposition != null && !contentDisposition.isEmpty()) {
-                    String filename = ContentDisposition.parse(contentDisposition).getFilename();
-                    if (filename != null && !filename.isEmpty()) {
-                        return filename;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            // HEAD request failed, will fall back to URL path
-        }
-        return null;
     }
 
     @Override

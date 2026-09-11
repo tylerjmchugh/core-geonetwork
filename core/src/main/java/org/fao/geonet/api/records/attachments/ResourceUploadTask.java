@@ -186,6 +186,11 @@ public class ResourceUploadTask implements ResourceUploadProgressListener {
         }
     }
 
+    @Override
+    public void onFilenameResolved(String filename) {
+        setFilename(filename);
+    }
+
     public synchronized boolean start() {
         if (status != Status.PENDING) {
             return false;

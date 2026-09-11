@@ -32,7 +32,6 @@ import org.fao.geonet.api.exception.NotAllowedException;
 import org.fao.geonet.api.exception.InputStreamLimitExceededException;
 import org.fao.geonet.api.exception.ResourceAlreadyExistException;
 import org.fao.geonet.api.exception.ResourceNotFoundException;
-import org.fao.geonet.constants.Geonet;
 import org.fao.geonet.domain.AbstractMetadata;
 import org.fao.geonet.domain.MetadataResource;
 import org.fao.geonet.domain.MetadataResourceVisibility;
@@ -41,7 +40,6 @@ import org.fao.geonet.kernel.datamanager.IMetadataUtils;
 import org.fao.geonet.repository.MetadataRepository;
 import org.fao.geonet.util.KnownSizeInputStream;
 import org.fao.geonet.util.LimitedInputStream;
-import org.fao.geonet.utils.Log;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -160,6 +158,10 @@ public abstract class AbstractStore implements Store {
 
     protected static AccessManager getAccessManager(final ServiceContext context) {
         return ApplicationContextHolder.get().getBean(AccessManager.class);
+    }
+
+    protected static ResourceUploadTaskRegistry getResourceUploadTaskRegistry() {
+        return ApplicationContextHolder.get().getBean(ResourceUploadTaskRegistry.class);
     }
 
     /**
@@ -348,6 +350,19 @@ public abstract class AbstractStore implements Store {
             filename = getFilenameFromUrl(fileUrl);
         }
 
+        if (StringUtils.isEmpty(filename)) {
+            throw new IOException("Unable to determine filename from URL or Content-Disposition header.");
+        }
+
+        progressListener.onFilenameResolved(filename);
+
+        if (hasInProgressUploadForFilename(metadataUuid, filename)) {
+            throw new ResourceAlreadyExistException(String.format(
+                "An upload for filename '%s' is already in progress for record '%s'. Wait for completion before retrying.",
+                filename, metadataUuid
+            ));
+        }
+
         // Check if the content length is within the allowed limit
         long contentLength = connection.getContentLengthLong();
         if (contentLength > maxUploadSize) {
@@ -444,6 +459,13 @@ public abstract class AbstractStore implements Store {
             // It was a filename
             return resourceId;
         }
+    }
+
+    protected boolean hasInProgressUploadForFilename(String metadataUuid, String filename) {
+        ResourceUploadTaskRegistry registry = getResourceUploadTaskRegistry();
+        return registry.getByMetadataUuid(metadataUuid).stream()
+            .filter(task -> !task.isTerminal())
+            .anyMatch(task -> filename.equals(task.getFilename()));
     }
 
     protected void checkResourceId(final String resourceId) {

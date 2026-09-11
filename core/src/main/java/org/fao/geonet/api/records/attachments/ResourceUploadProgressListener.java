@@ -77,4 +77,13 @@ public interface ResourceUploadProgressListener {
      */
     default void onStreamClosed(Closeable stream) {
     }
+
+    /**
+     * Called when the filename of the uploaded resource has been resolved. This can be
+     * used to perform any necessary actions based on the resolved filename.
+     *
+     * @param filename The resolved filename of the uploaded resource.
+     */
+    default void onFilenameResolved(String filename) {
+    }
 }

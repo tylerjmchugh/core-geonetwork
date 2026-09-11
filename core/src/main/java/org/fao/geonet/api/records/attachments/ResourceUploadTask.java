@@ -24,6 +24,7 @@
  */
 package org.fao.geonet.api.records.attachments;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import org.fao.geonet.domain.MetadataResource;
 import org.fao.geonet.domain.MetadataResourceVisibility;
@@ -34,6 +35,7 @@ import java.util.Date;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -81,6 +83,9 @@ public class ResourceUploadTask implements ResourceUploadProgressListener {
     private volatile MetadataResource resource;
     private volatile String error;
     private volatile Closeable activeStream;
+    @JsonIgnore
+    private volatile FutureTask<Void> future;
+
 
     public ResourceUploadTask(String metadataUuid, String url, MetadataResourceVisibility visibility,
                                Boolean approved, Integer ownerUserId) {
@@ -168,6 +173,14 @@ public class ResourceUploadTask implements ResourceUploadProgressListener {
 
     public boolean isTerminal() {
         return status == Status.COMPLETED || status == Status.FAILED || status == Status.CANCELLED;
+    }
+
+    FutureTask<Void> getFuture() {
+        return future;
+    }
+
+    void setFuture(FutureTask<Void> future) {
+        this.future = future;
     }
 
     public boolean isFinalizing() {

@@ -39,25 +39,14 @@ import org.fao.geonet.utils.Log;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ConfigurableApplicationContext;
-import org.springframework.http.ContentDisposition;
-import org.springframework.http.HttpHeaders;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import javax.servlet.http.HttpServletRequest;
-import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.List;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.Future;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -88,45 +77,66 @@ public class AsyncResourceUploadService implements DisposableBean {
     @Autowired
     private ServiceManager serviceManager;
 
-    private final ConcurrentMap<String, Future<?>> futures = new ConcurrentHashMap<>();
-
     private final ThreadPoolExecutor executor = new ThreadPoolExecutor(
         CORE_POOL_SIZE, MAX_POOL_SIZE, KEEP_ALIVE_SECONDS, TimeUnit.SECONDS,
         new ArrayBlockingQueue<>(QUEUE_CAPACITY), new NamedThreadFactory("resource-upload-"));
 
     /**
-     * Schedule an asynchronous download of {@code url} into the store for
-     * {@code metadataUuid}. The caller is responsible for having already
-     * verified edit rights on the record.
+     * Schedules an asynchronous resource upload.
+     * The caller must have verified edit rights on the record.
      *
-     * @return the newly created, registered task (initially {@code PENDING})
-     * @throws RejectedExecutionException if the background pool is saturated
+     * @return the registered task, marked failed if the executor rejects it
      */
-    public ResourceUploadTask submit(Store store, ServiceContext requestContext, String metadataUuid, URL url,
-                                     MetadataResourceVisibility visibility, Boolean approved) {
+    public synchronized ResourceUploadTask submit(
+        Store store,
+        ServiceContext requestContext,
+        String metadataUuid,
+        URL url,
+        MetadataResourceVisibility visibility,
+        Boolean approved
+    ) {
         UserSession userSession = requestContext.getUserSession();
         String language = requestContext.getLanguage();
-        Integer ownerUserId = userSession != null ? userSession.getUserIdAsInt() : null;
+        Integer ownerUserId =
+            userSession != null ? userSession.getUserIdAsInt() : null;
 
         SecurityContext securityContext = SecurityContextHolder.getContext();
 
-        ResourceUploadTask task = new ResourceUploadTask(metadataUuid, url.toString(), visibility, approved, ownerUserId);
+        ResourceUploadTask task = new ResourceUploadTask(
+            metadataUuid,
+            url.toString(),
+            visibility,
+            approved,
+            ownerUserId);
+
+        FutureTask<Void> future = new FutureTask<>(() -> {
+            run(
+                store,
+                task,
+                url,
+                userSession,
+                securityContext,
+                language,
+                metadataUuid,
+                visibility,
+                approved);
+            return null;
+        });
+
+        // Attach the execution handle before making the task discoverable.
+        task.setFuture(future);
         registry.register(task);
-        if (Log.isDebugEnabled(org.fao.geonet.constants.Geonet.RESOURCES)) {
-            Log.debug(org.fao.geonet.constants.Geonet.RESOURCES,
-                "Registered async upload task " + task.getId() + " for metadata '" + metadataUuid + "' from URL '" + url + "'.");
-        }
 
         try {
-            Future<?> future = executor.submit(() -> run(store, task, url, userSession, securityContext, language, metadataUuid, visibility, approved));
-            futures.put(task.getId(), future);
-            if (Log.isDebugEnabled(org.fao.geonet.constants.Geonet.RESOURCES)) {
-                Log.debug(org.fao.geonet.constants.Geonet.RESOURCES,
-                    "Submitted async upload task " + task.getId() + " to executor. queuedTasks=" + executor.getQueue().size());
-            }
+            executor.execute(future);
         } catch (RejectedExecutionException e) {
-            task.fail("The server is too busy to process this upload right now. Please retry later.");
+            task.fail(
+                "The server is too busy to process this upload right now. "
+                    + "Please retry later.");
+
+            future.cancel(false);
         }
+
         return task;
     }
 
@@ -195,7 +205,6 @@ public class AsyncResourceUploadService implements DisposableBean {
             }
         } finally {
             task.markCancelledAfterCleanup();
-            futures.remove(task.getId());
             if (Log.isDebugEnabled(org.fao.geonet.constants.Geonet.RESOURCES)) {
                 Log.debug(org.fao.geonet.constants.Geonet.RESOURCES,
                     "Finished async upload task " + task.getId() + ". status=" + task.getStatus());
@@ -204,15 +213,15 @@ public class AsyncResourceUploadService implements DisposableBean {
         }
     }
 
-    public boolean cancel(ResourceUploadTask task) {
+    public synchronized boolean cancel(ResourceUploadTask task) {
         if (!task.cancel()) {
             return false;
         }
 
-        Future<?> future = futures.remove(task.getId());
-        if (future != null) {
-            future.cancel(true);
-        }
+        FutureTask<Void> future = task.getFuture();
+
+        future.cancel(true);
+        executor.remove(future);
 
         return true;
     }
